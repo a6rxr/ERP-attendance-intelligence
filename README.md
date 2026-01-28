@@ -27,6 +27,7 @@ A premium Chrome extension for KL University students to analyze, predict, and o
 ### ⚙️ Customization
 - **Adjustable Threshold**: Set your own minimum attendance requirement (default: 75%)
 - **Sort Options**: View subjects by risk level, name, or attendance percentage
+- **Attendance Mode Toggle**: Choose whether TCBR should be included in attendance calculations, allowing more flexible and realistic analysis.
 - **Persistent Settings**: Your preferences are saved across sessions
 
 ## 📥 Installation
@@ -35,27 +36,18 @@ A premium Chrome extension for KL University students to analyze, predict, and o
 
 1. **Download/Clone** this folder to your computer
 
-2. **Convert SVG icons to PNG** (required for Chrome):
-   - The `icons/` folder contains SVG files
-   - Use any image converter to create PNG versions:
-     - `icon16.png` (16x16 pixels)
-     - `icon32.png` (32x32 pixels)
-     - `icon48.png` (48x48 pixels)
-     - `icon128.png` (128x128 pixels)
-   - Or use an online tool like [SVG to PNG Converter](https://svgtopng.com/)
-
-3. **Open Chrome Extensions**:
+2. **Open Chrome Extensions**:
    - Navigate to `chrome://extensions/`
    - OR go to Menu → More Tools → Extensions
 
-4. **Enable Developer Mode**:
+3. **Enable Developer Mode**:
    - Toggle the "Developer mode" switch in the top-right corner
 
-5. **Load the Extension**:
+4. **Load the Extension**:
    - Click "Load unpacked"
-   - Select this extension folder (`erp-attendance-extension`)
+   - Select this extension folder (`erp-attendance-intelligence`)
 
-6. **Pin the Extension** (recommended):
+5. **Pin the Extension** (recommended):
    - Click the puzzle piece icon in Chrome toolbar
    - Pin "ERP Attendance Intelligence"
 
@@ -82,6 +74,7 @@ A premium Chrome extension for KL University students to analyze, predict, and o
    - Click the ⚙️ gear icon
    - Adjust your attendance threshold
    - Change sort order
+   - Switch between ERP Standard and TCBR-Corrected
    - Toggle between light/dark themes
 
 ## 📁 File Structure
@@ -104,33 +97,41 @@ erp-attendance-extension/
 
 ## 🧮 Calculation Logic
 
-### Component Attendance
-```
-component_percentage = (attended / conducted) * 100
+## How the Math Works (Simplified)
+
+Component Attendance
+percentage = effectiveAttended / conducted × 100
+
+effectiveAttended = attended (ERP Mode)
+
+effectiveAttended = attended + TCBR (TCBR-Corrected Mode)
+
+## Subject Attendance
+subjectPercentage = average(all component percentages)
+
+LTPS components are equally weighted.
+
+## Classes Needed (Below Threshold)
+(effectiveAttended + x) / (conducted + x) ≥ threshold
+
+Solves for minimum x classes you must attend consecutively.
+
+## Classes You Can Skip (Above Threshold)
+effectiveAttended / (conducted + x) ≥ threshold
+
+Solves for maximum x safe skips.
+
 ```
 
-### Subject Final Attendance
-```
-subject_percentage = average(all component percentages)
-```
-Each LTPS component has **equal weight** regardless of class count.
+### ⚠️ Important: TCBR
+The extension internally supports multiple attendance calculation modes:
 
-### Classes Needed to Reach Threshold
-```
-If current_percentage < threshold:
-  classes_needed = ceil((threshold * conducted - attended * 100) / (100 - threshold))
-```
+- **ERP Mode**: Matches ERP’s displayed attendance exactly  
+- **TCBR-Corrected Mode**: Includes TCBR for deeper analysis
 
-### Classes Safe to Skip
-```
-If current_percentage >= threshold:
-  can_skip = floor((attended * 100 - threshold * conducted) / threshold)
-```
+The default behavior matches ERP to avoid confusion, while advanced users
+can switch modes from the settings panel.
 
-### ⚠️ Important: TCBR (Total Classes Before Registration)
-- TCBR is **completely ignored** in all calculations
-- ERP already handles TCBR internally
-- This extension uses raw `attended/conducted` values as-is
 
 ## 🔧 Technical Details
 
@@ -162,6 +163,7 @@ If current_percentage >= threshold:
 ### Icons not loading
 - Ensure PNG versions of icons exist in the `icons/` folder
 - Check that file names match those in `manifest.json`
+```
 
 ## 📄 License
 
@@ -170,7 +172,8 @@ MIT License - Feel free to use, modify, and distribute.
 ## 🙏 Credits
 
 Built with ❤️ for KL University students who want to optimize their attendance.
+Built for students who think ahead, not just attend. 
 
----
+
 
 **Disclaimer**: This extension is an unofficial tool. Always verify attendance data with official ERP records.
