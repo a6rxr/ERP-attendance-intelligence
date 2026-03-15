@@ -13,6 +13,18 @@
  * - Subject Percentage = Average of all component percentages (equal weight)
  */
 
+/**
+ * Default weightages for each LTPS component (percentage, 0-100).
+ * These control how much each component "counts" toward the overall weighted average.
+ * Lecture = 100%, Practical = 50%, Skill = 25%, Tutorial = 50%
+ */
+const DEFAULT_WEIGHTAGES = {
+    'L': 100,
+    'T': 50,
+    'P': 50,
+    'S': 25
+};
+
 const AttendanceCalculator = {
 
     /**
@@ -76,17 +88,19 @@ const AttendanceCalculator = {
     },
 
     /**
-     * Calculate final subject attendance (average of all components)
-     * Each component has EQUAL weight regardless of class count
+     * Calculate final subject attendance using component weightages.
+     * Each component is weighted by its configured weightage value.
+     * A component with weightage=100 counts fully; weightage=50 counts half as much.
      * @param {Object} components - Object with LTPS components
-     * @returns {number} Average percentage across all components
+     * @param {Object} [weightages] - Per-component weightage overrides (0-100). Falls back to DEFAULT_WEIGHTAGES.
+     * @returns {number} Weighted average percentage across all components
      */
-    calculateSubjectPercentage(components) {
+    calculateSubjectPercentage(components, weightages = {}) {
         const componentTypes = Object.keys(components);
         if (componentTypes.length === 0) return 0;
 
-        let totalPercentage = 0;
-        let validComponents = 0;
+        let weightedSum = 0;
+        let totalWeight = 0;
 
         for (const type of componentTypes) {
             const comp = components[type];
@@ -96,13 +110,15 @@ const AttendanceCalculator = {
                     comp.conducted,
                     comp.tcbr || 0
                 );
-                totalPercentage += percentage;
-                validComponents++;
+                // Resolve weightage: custom > default > 100 (treat unknown types as full weight)
+                const w = (weightages[type] !== undefined ? weightages[type] : (DEFAULT_WEIGHTAGES[type] !== undefined ? DEFAULT_WEIGHTAGES[type] : 100)) / 100;
+                weightedSum += percentage * w;
+                totalWeight += w;
             }
         }
 
-        if (validComponents === 0) return 100;
-        return totalPercentage / validComponents;
+        if (totalWeight === 0) return 100;
+        return weightedSum / totalWeight;
     },
 
     /**
@@ -264,13 +280,13 @@ const AttendanceCalculator = {
      * @param {number} threshold - Target percentage
      * @returns {Object} Calculation results for the subject
      */
-    calculateSubjectSimulation(components, threshold) {
+    calculateSubjectSimulation(components, threshold, weightages = {}) {
         const componentTypes = Object.keys(components);
         if (componentTypes.length === 0) {
             return { status: 'safe', classesNeeded: 0, canSkip: 0 };
         }
 
-        const currentPercentage = this.calculateSubjectPercentage(components);
+        const currentPercentage = this.calculateSubjectPercentage(components, weightages);
         const status = this.getStatus(currentPercentage, threshold);
 
         // Calculate component-wise data
@@ -328,7 +344,8 @@ const AttendanceCalculator = {
             // For below threshold: sum of all classes needed
             totalClassesNeeded: Math.min(totalClassesNeeded, 300), // Sanity cap
             // For above threshold: minimum across all components (bottleneck)
-            canSkip: minCanSkip === Infinity ? 0 : Math.min(minCanSkip, 100) // Sanity cap
+            canSkip: minCanSkip === Infinity ? 0 : Math.min(minCanSkip, 100), // Sanity cap
+            weightages: weightages
         };
     },
 
@@ -338,14 +355,16 @@ const AttendanceCalculator = {
      * @param {number} threshold - Attendance threshold
      * @returns {Array} Processed subjects with calculations
      */
-    processAllSubjects(rawData, threshold) {
+    processAllSubjects(rawData, threshold, allWeightages = {}) {
         if (!rawData || !rawData.subjects) return [];
 
         const processed = [];
 
         for (const subjectKey of Object.keys(rawData.subjects)) {
             const subject = rawData.subjects[subjectKey];
-            const simulation = this.calculateSubjectSimulation(subject.components, threshold);
+            // Look up weightage by courseCode
+            const subjectWeightages = allWeightages[subject.courseCode] || {};
+            const simulation = this.calculateSubjectSimulation(subject.components, threshold, subjectWeightages);
 
             // Calculate totals across all components
             let totalConducted = 0;
@@ -485,4 +504,5 @@ const AttendanceCalculator = {
 // Export for use in popup.js
 if (typeof window !== 'undefined') {
     window.AttendanceCalculator = AttendanceCalculator;
+    window.DEFAULT_WEIGHTAGES = DEFAULT_WEIGHTAGES;
 }

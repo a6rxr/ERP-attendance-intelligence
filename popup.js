@@ -56,8 +56,13 @@ let state = {
     attendanceMode: 'ERP', // "ERP" or "TCBR_CORRECTED"
     attendanceData: null,
     processedSubjects: [],
-    lastFetched: null
+    lastFetched: null,
+    // Per-subject weightage overrides. Key = courseCode, value = { L, T, P, S } (0-100)
+    subjectWeightages: {}
 };
+
+// Track which subject's modal is open (courseCode)
+let activeWeightageSubject = null;
 
 /**
  * Initialize the popup
@@ -166,11 +171,12 @@ function cacheElements() {
 async function loadSettings() {
     return new Promise((resolve) => {
         if (typeof chrome !== 'undefined' && chrome.storage) {
-            chrome.storage.local.get(['theme', 'threshold', 'sortBy', 'attendanceMode', 'lastData'], (result) => {
+            chrome.storage.local.get(['theme', 'threshold', 'sortBy', 'attendanceMode', 'lastData', 'subjectWeightages'], (result) => {
                 if (result.theme) state.theme = result.theme;
                 if (result.threshold) state.threshold = result.threshold;
                 if (result.sortBy) state.sortBy = result.sortBy;
                 if (result.attendanceMode) state.attendanceMode = result.attendanceMode;
+                if (result.subjectWeightages) state.subjectWeightages = result.subjectWeightages;
                 if (result.lastData) {
                     state.attendanceData = result.lastData.data;
                     state.lastFetched = result.lastData.timestamp;
@@ -201,7 +207,8 @@ async function saveSettings() {
         theme: state.theme,
         threshold: state.threshold,
         sortBy: state.sortBy,
-        attendanceMode: state.attendanceMode
+        attendanceMode: state.attendanceMode,
+        subjectWeightages: state.subjectWeightages
     };
 
     if (typeof chrome !== 'undefined' && chrome.storage) {
@@ -245,10 +252,19 @@ function setupEventListeners() {
     elements.retryBtn.addEventListener('click', fetchAttendanceData);
     elements.refreshBtn.addEventListener('click', fetchAttendanceData);
 
+    // Weightage modal
+    document.getElementById('weightageModalClose').addEventListener('click', closeWeightageModal);
+    document.getElementById('weightageApplyBtn').addEventListener('click', applyWeightages);
+    document.getElementById('weightageResetBtn').addEventListener('click', resetWeightages);
+    document.getElementById('weightageModalOverlay').addEventListener('click', (e) => {
+        if (e.target === e.currentTarget) closeWeightageModal();
+    });
+
     // Keyboard accessibility
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             elements.settingsPanel.classList.add('hidden');
+            closeWeightageModal();
         }
     });
 }
@@ -450,10 +466,11 @@ function renderResults() {
     // Ensure calculator is using current mode
     AttendanceCalculator.setMode(state.attendanceMode);
 
-    // Process subjects with calculations
+    // Process subjects with calculations (pass per-subject weightages)
     state.processedSubjects = AttendanceCalculator.processAllSubjects(
         state.attendanceData,
-        state.threshold
+        state.threshold,
+        state.subjectWeightages
     );
 
     // Sort subjects
@@ -627,6 +644,15 @@ function createSubjectCard(subject) {
         }
     }
 
+    // Weightage button
+    const weightageBtn = card.querySelector('.weightage-btn');
+    const weightageCustomBadge = weightageBtn.querySelector('.weightage-custom-badge');
+    // Show 'Custom' badge if this subject has custom weightages
+    if (state.subjectWeightages[subject.courseCode] && Object.keys(state.subjectWeightages[subject.courseCode]).length > 0) {
+        weightageCustomBadge.classList.remove('hidden');
+    }
+    weightageBtn.addEventListener('click', () => openWeightageModal(subject));
+
     return card;
 }
 
@@ -721,6 +747,141 @@ function formatRelativeTime(date) {
 
     const diffDays = Math.floor(diffHours / 24);
     return `${diffDays}d ago`;
+}
+
+// =============================================
+// WEIGHTAGE MODAL LOGIC
+// =============================================
+
+/**
+ * Open the weightage editor modal for a subject.
+ * Only shows sliders for components that actually exist in that subject.
+ */
+function openWeightageModal(subject) {
+    activeWeightageSubject = subject.courseCode;
+
+    document.getElementById('weightageModalSubject').textContent = subject.courseName;
+
+    const slidersContainer = document.getElementById('weightageSliders');
+    slidersContainer.innerHTML = '';
+
+    // Get current custom weightages for this subject (or empty object = use defaults)
+    const currentWeightages = state.subjectWeightages[subject.courseCode] || {};
+
+    // Only build sliders for components that actually exist in this subject
+    const componentTypes = Object.keys(subject.componentData);
+
+    for (const type of componentTypes) {
+        const ltpsInfo = AttendanceCalculator.getLTPSInfo(type);
+        const defaultVal = DEFAULT_WEIGHTAGES[type] !== undefined ? DEFAULT_WEIGHTAGES[type] : 100;
+        const currentVal = currentWeightages[type] !== undefined ? currentWeightages[type] : defaultVal;
+
+        const row = document.createElement('div');
+        row.className = 'weightage-slider-row';
+        row.innerHTML = `
+            <div class="weightage-slider-label">
+                <span class="weightage-slider-icon">${ltpsInfo.icon}</span>
+                <span class="weightage-slider-name">${ltpsInfo.name} (${type})</span>
+                <span class="weightage-default-hint">Default: ${defaultVal}%</span>
+            </div>
+            <div class="weightage-slider-control">
+                <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="5"
+                    value="${currentVal}"
+                    id="weightageSlider_${type}"
+                    class="weightage-range"
+                    aria-label="${ltpsInfo.name} weightage"
+                />
+                <div class="weightage-value-display">
+                    <span class="weightage-value-number" id="weightageVal_${type}">${currentVal}</span>
+                    <span class="weightage-value-pct">%</span>
+                </div>
+            </div>
+        `;
+        slidersContainer.appendChild(row);
+
+        // Live update the displayed number
+        const rangeInput = row.querySelector(`#weightageSlider_${type}`);
+        const valDisplay = row.querySelector(`#weightageVal_${type}`);
+        rangeInput.addEventListener('input', () => {
+            valDisplay.textContent = rangeInput.value;
+        });
+    }
+
+    // Show the modal with animation
+    const overlay = document.getElementById('weightageModalOverlay');
+    overlay.classList.remove('hidden');
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+}
+
+/**
+ * Close the weightage modal
+ */
+function closeWeightageModal() {
+    const overlay = document.getElementById('weightageModalOverlay');
+    overlay.classList.remove('visible');
+    setTimeout(() => overlay.classList.add('hidden'), 250);
+    activeWeightageSubject = null;
+}
+
+/**
+ * Apply (save) the current slider values as weightages for the active subject
+ */
+function applyWeightages() {
+    if (!activeWeightageSubject) return;
+
+    const subject = state.processedSubjects.find(s => s.courseCode === activeWeightageSubject);
+    if (!subject) return;
+
+    const componentTypes = Object.keys(subject.componentData);
+    const newWeightages = {};
+    let isAllDefault = true;
+
+    for (const type of componentTypes) {
+        const input = document.getElementById(`weightageSlider_${type}`);
+        if (input) {
+            const val = parseInt(input.value, 10);
+            newWeightages[type] = val;
+            const defaultVal = DEFAULT_WEIGHTAGES[type] !== undefined ? DEFAULT_WEIGHTAGES[type] : 100;
+            if (val !== defaultVal) isAllDefault = false;
+        }
+    }
+
+    if (isAllDefault) {
+        // Remove custom weightage entirely (same as default)
+        delete state.subjectWeightages[activeWeightageSubject];
+    } else {
+        state.subjectWeightages[activeWeightageSubject] = newWeightages;
+    }
+
+    saveSettings();
+    closeWeightageModal();
+    renderResults();
+    showToast('Weightages updated!');
+}
+
+/**
+ * Reset the sliders to defaults for the active subject
+ */
+function resetWeightages() {
+    if (!activeWeightageSubject) return;
+
+    const subject = state.processedSubjects.find(s => s.courseCode === activeWeightageSubject);
+    if (!subject) return;
+
+    const componentTypes = Object.keys(subject.componentData);
+    for (const type of componentTypes) {
+        const input = document.getElementById(`weightageSlider_${type}`);
+        const valDisplay = document.getElementById(`weightageVal_${type}`);
+        if (input && valDisplay) {
+            const defaultVal = DEFAULT_WEIGHTAGES[type] !== undefined ? DEFAULT_WEIGHTAGES[type] : 100;
+            input.value = defaultVal;
+            valDisplay.textContent = defaultVal;
+        }
+    }
 }
 
 // Initialize when DOM is ready
