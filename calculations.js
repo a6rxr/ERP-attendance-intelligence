@@ -1,131 +1,76 @@
 /**
- * ERP Attendance Intelligence - Calculations Module
- * 
- * Contains all mathematical logic for attendance calculations and simulations.
- * 
- * ATTENDANCE MODE SUPPORT:
- * - "ERP": Uses raw attended value as-is (ERP's display behavior)
- * - "TCBR_CORRECTED": Uses attended + tcbr for effective attended
- * 
- * Formula Reference:
- * - effectiveAttended = (mode === "TCBR_CORRECTED") ? attended + tcbr : attended
- * - Component Percentage = (effectiveAttended / conducted) * 100
- * - Subject Percentage = Average of all component percentages (equal weight)
+ * ERP Attendance Intelligence — Calculations Module
+ *
+ * All mathematical logic for attendance calculations and simulations.
+ *
+ * ATTENDANCE MODES:
+ *   "ERP"            — uses raw attended value (matches ERP display)
+ *   "TCBR_CORRECTED" — adds TCBR to attended for effective attendance
+ *
+ * KEY FORMULA:
+ *   effectiveAttended = mode === "TCBR_CORRECTED" ? attended + tcbr : attended
+ *   componentPct      = (effectiveAttended / conducted) * 100
+ *   subjectPct        = weighted average of all component percentages
  */
 
-/**
- * Default weightages for each LTPS component (percentage, 0-100).
- * These control how much each component "counts" toward the overall weighted average.
- * Lecture = 100%, Practical = 50%, Skill = 25%, Tutorial = 50%
- */
-const DEFAULT_WEIGHTAGES = {
-    'L': 100,
-    'T': 50,
-    'P': 50,
-    'S': 25
-};
+/** Default weightage for each LTPS component type (0–100 scale). */
+const DEFAULT_WEIGHTAGES = { L: 100, T: 100, P: 100, S: 100 };
 
 const AttendanceCalculator = {
 
-    /**
-     * Current attendance mode
-     * "ERP" - Use raw attended value (matches ERP display)
-     * "TCBR_CORRECTED" - Add TCBR to attended for effective attendance
-     */
-    attendanceMode: "ERP",
+    /** @type {"ERP"|"TCBR_CORRECTED"} */
+    attendanceMode: 'ERP',
 
-    /**
-     * Set the attendance calculation mode
-     * @param {string} mode - "ERP" or "TCBR_CORRECTED"
-     */
+    /** @param {"ERP"|"TCBR_CORRECTED"} mode */
     setMode(mode) {
-        if (mode === "ERP" || mode === "TCBR_CORRECTED") {
-            this.attendanceMode = mode;
-            // console.log(`[Calculations] Mode set to: ${mode}`);
-        } else {
-            // console.warn(`[Calculations] Invalid mode: ${mode}, defaulting to ERP`);
-            this.attendanceMode = "ERP";
-        }
+        this.attendanceMode = (mode === 'ERP' || mode === 'TCBR_CORRECTED') ? mode : 'ERP';
+    },
+
+    /** @returns {string} Human-readable mode label */
+    getModeDisplayText() {
+        return this.attendanceMode === 'TCBR_CORRECTED' ? 'TCBR-Corrected' : 'ERP Standard';
     },
 
     /**
-     * Get effective attended count based on current mode
-     * @param {number} attended - Raw attended classes
-     * @param {number} tcbr - Total Classes Before Registration
-     * @returns {number} Effective attended count
+     * Effective attended count for the current mode.
+     * @param {number} attended
+     * @param {number} tcbr
      */
     getEffectiveAttended(attended, tcbr) {
-        if (this.attendanceMode === "TCBR_CORRECTED") {
-            return attended + (tcbr || 0);
-        }
-        return attended;
+        return this.attendanceMode === 'TCBR_CORRECTED' ? attended + (tcbr || 0) : attended;
     },
 
     /**
-     * Calculate component attendance percentage
-     * @param {number} attended - Raw attended classes
-     * @param {number} conducted - Classes conducted (NEVER modified)
-     * @param {number} tcbr - TCBR value
-     * @returns {number} Percentage (0-100)
+     * Attendance percentage for a single component.
+     * Returns 100 when nothing has been conducted (no penalty for zero-conducted components).
      */
     calculateComponentPercentage(attended, conducted, tcbr = 0) {
-        if (conducted <= 0) return 100; // No classes conducted = 100% by default
-
-        const effectiveAttended = this.getEffectiveAttended(attended, tcbr);
-        const percentage = (effectiveAttended / conducted) * 100;
-
-        // Sanity guard: percentage should be 0-100
-        if (percentage < 0) {
-            // console.warn(`[Calculations] Negative percentage detected, clamping to 0`);
-            return 0;
-        }
-        if (percentage > 100) {
-            // console.warn(`[Calculations] Percentage > 100 detected (${percentage.toFixed(1)}%), clamping to 100`);
-            return 100;
-        }
-
-        return percentage;
+        if (conducted <= 0) return 100;
+        const pct = (this.getEffectiveAttended(attended, tcbr) / conducted) * 100;
+        return Math.min(100, Math.max(0, pct));
     },
 
     /**
-     * Calculate final subject attendance using component weightages.
-     * Each component is weighted by its configured weightage value.
-     * A component with weightage=100 counts fully; weightage=50 counts half as much.
-     * @param {Object} components - Object with LTPS components
-     * @param {Object} [weightages] - Per-component weightage overrides (0-100). Falls back to DEFAULT_WEIGHTAGES.
-     * @returns {number} Weighted average percentage across all components
+     * Weighted-average attendance across all components.
+     * Components with weightage=0 are excluded from the average.
+     * @param {Object} components  Raw LTPS component map
+     * @param {Object} weightages  Per-type overrides (0–100)
      */
     calculateSubjectPercentage(components, weightages = {}) {
-        const componentTypes = Object.keys(components);
-        if (componentTypes.length === 0) return 0;
-
-        let weightedSum = 0;
-        let totalWeight = 0;
-
-        for (const type of componentTypes) {
-            const comp = components[type];
-            if (comp.conducted > 0) {
-                const percentage = this.calculateComponentPercentage(
-                    comp.attended,
-                    comp.conducted,
-                    comp.tcbr || 0
-                );
-                // Resolve weightage: custom > default > 100 (treat unknown types as full weight)
-                const w = (weightages[type] !== undefined ? weightages[type] : (DEFAULT_WEIGHTAGES[type] !== undefined ? DEFAULT_WEIGHTAGES[type] : 100)) / 100;
-                weightedSum += percentage * w;
-                totalWeight += w;
-            }
+        let weightedSum = 0, totalWeight = 0;
+        for (const [type, comp] of Object.entries(components)) {
+            if (comp.conducted <= 0) continue;
+            const pct = this.calculateComponentPercentage(comp.attended, comp.conducted, comp.tcbr || 0);
+            const w = ((weightages[type] ?? DEFAULT_WEIGHTAGES[type] ?? 100)) / 100;
+            weightedSum += pct * w;
+            totalWeight += w;
         }
-
-        if (totalWeight === 0) return 100;
-        return weightedSum / totalWeight;
+        return totalWeight === 0 ? 100 : weightedSum / totalWeight;
     },
 
     /**
-     * Determine status based on percentage and threshold
-     * @param {number} percentage - Current attendance percentage
-     * @param {number} threshold - Minimum required percentage
-     * @returns {string} 'safe', 'borderline', or 'critical'
+     * Status bucket based on distance from threshold.
+     * @returns {"safe"|"borderline"|"critical"}
      */
     getStatus(percentage, threshold) {
         if (percentage >= threshold + 5) return 'safe';
@@ -133,375 +78,222 @@ const AttendanceCalculator = {
         return 'critical';
     },
 
-    /**
-     * Calculate danger score for sorting (higher = more dangerous)
-     * @param {number} percentage - Current attendance percentage
-     * @param {number} threshold - Minimum required percentage
-     * @returns {number} Danger score (0-100+)
-     */
+    /** Higher score = more danger. Used for default sort. */
     calculateDangerScore(percentage, threshold) {
-        if (percentage >= threshold) {
-            // Above threshold: danger based on margin
-            return Math.max(0, threshold + 10 - percentage);
-        } else {
-            // Below threshold: high danger
-            return 50 + (threshold - percentage);
-        }
+        return percentage >= threshold
+            ? Math.max(0, threshold + 10 - percentage)
+            : 50 + (threshold - percentage);
     },
 
     /**
-     * CASE 1: Below Threshold - Calculate classes needed to reach threshold
-     * 
-     * Mathematical derivation:
-     * (effectiveAttended + x) / (conducted + x) >= threshold/100
-     * 
-     * Solving for x:
-     * effectiveAttended + x >= (threshold/100) * (conducted + x)
-     * x - (threshold/100) * x >= (threshold/100) * conducted - effectiveAttended
-     * x * (1 - threshold/100) >= (threshold/100) * conducted - effectiveAttended
-     * x >= ((threshold/100) * conducted - effectiveAttended) / (1 - threshold/100)
-     * 
-     * @param {number} attended - Raw attended classes
-     * @param {number} conducted - Classes conducted (NEVER modified)
-     * @param {number} threshold - Target percentage (e.g., 75)
-     * @param {number} tcbr - TCBR value
-     * @returns {number} Minimum classes to attend consecutively (0 if already at threshold)
+     * Consecutive classes needed to reach `threshold`.
+     * Returns Infinity when the threshold is mathematically unreachable.
+     * Formula: x = ceil((T*C - A*100) / (100 - T))  where T=threshold, C=conducted, A=effectiveAttended
      */
     classesNeededToReachThreshold(attended, conducted, threshold, tcbr = 0) {
-        const effectiveAttended = this.getEffectiveAttended(attended, tcbr);
-        const currentPercentage = this.calculateComponentPercentage(attended, conducted, tcbr);
+        const effective = this.getEffectiveAttended(attended, tcbr);
+        if (this.calculateComponentPercentage(attended, conducted, tcbr) >= threshold) return 0;
+        if (threshold >= 100) return effective < conducted ? Infinity : 0;
 
-        // Already at or above threshold
-        if (currentPercentage >= threshold) return 0;
-
-        // Edge case: threshold is 100% (or higher)
-        if (threshold >= 100) {
-            // If we have missed ANY class, we can NEVER reach 100% again
-            // (unless conducted resets, which we don't assume)
-            if (effectiveAttended < conducted) {
-                return Infinity; // Impossible
-            }
-            return 0; // Already at 100%
-        }
-
-        const thresholdDecimal = threshold / 100;
-
-        // Formula: x = ceil((threshold * conducted - effectiveAttended * 100) / (100 - threshold))
-        // Derived from: (effectiveAttended + x) / (conducted + x) >= threshold/100
-        const numerator = (thresholdDecimal * conducted) - effectiveAttended;
-        const denominator = 1 - thresholdDecimal;
-
-        if (denominator <= 0) {
-            return Infinity; // Should be caught by threshold >= 100, but safety first
-        }
-
-        const classesNeeded = Math.ceil(numerator / denominator);
-
-        // Return exact number, let UI handle display caps if needed
-        return Math.max(0, classesNeeded);
+        const numerator = (threshold / 100) * conducted - effective;
+        const denominator = 1 - threshold / 100;
+        if (denominator <= 0) return Infinity;
+        return Math.max(0, Math.ceil(numerator / denominator));
     },
 
     /**
-     * CASE 2: Above Threshold - Calculate classes that can be skipped
-     * 
-     * Mathematical derivation:
-     * effectiveAttended / (conducted + x) >= threshold/100
-     * effectiveAttended >= (threshold/100) * (conducted + x)
-     * effectiveAttended - (threshold/100) * conducted >= (threshold/100) * x
-     * x <= (effectiveAttended - (threshold/100) * conducted) / (threshold/100)
-     * 
-     * @param {number} attended - Raw attended classes
-     * @param {number} conducted - Classes conducted (NEVER modified)
-     * @param {number} threshold - Minimum percentage (e.g., 75)
-     * @param {number} tcbr - TCBR value
-     * @returns {number} Maximum classes that can be skipped (0 if below threshold)
+     * Maximum classes that can be skipped while staying at / above `threshold`.
+     * Formula: x = floor((A - T*C/100) / (T/100))
      */
     classesCanSkip(attended, conducted, threshold, tcbr = 0) {
-        const effectiveAttended = this.getEffectiveAttended(attended, tcbr);
-        const currentPercentage = this.calculateComponentPercentage(attended, conducted, tcbr);
+        const effective = this.getEffectiveAttended(attended, tcbr);
+        if (this.calculateComponentPercentage(attended, conducted, tcbr) < threshold) return 0;
+        if (threshold <= 0) return 999;
 
-        // Already below threshold
-        if (currentPercentage < threshold) return 0;
-
-        // Edge case: threshold is 0%
-        if (threshold <= 0) {
-            return 100; // Arbitrary large number, capped
-        }
-
-        const thresholdDecimal = threshold / 100;
-
-        // Formula: x = floor((effectiveAttended - threshold * conducted / 100) / (threshold / 100))
-        const numerator = effectiveAttended - (thresholdDecimal * conducted);
-        const denominator = thresholdDecimal;
-
-        if (denominator <= 0) {
-            return 100; // Cap for edge case
-        }
-
-        const canSkip = Math.floor(numerator / denominator);
-
-        // Sanity guard: cap at reasonable number
-        if (canSkip > 100) {
-            // console.warn(`[Calculations] Can skip (${canSkip}) capped at 100`);
-            return 100;
-        }
-
-        return Math.max(0, canSkip);
+        const t = threshold / 100;
+        return Math.max(0, Math.floor((effective - t * conducted) / t));
     },
 
     /**
-     * Simulate what happens if next class is missed
-     * @param {number} attended - Raw attended classes
-     * @param {number} conducted - Classes conducted
-     * @param {number} threshold - Minimum percentage
-     * @param {number} tcbr - TCBR value
-     * @returns {Object} Simulation results
+     * What happens if the very next class is missed?
+     * @returns {{ currentPercentage, newPercentage, percentageDrop, wouldFallBelowThreshold, isAlreadyBelowThreshold }}
      */
     simulateMissNextClass(attended, conducted, threshold, tcbr = 0) {
-        const currentPercentage = this.calculateComponentPercentage(attended, conducted, tcbr);
-        const newConducted = conducted + 1;
-        // When missing next class, attended stays same, conducted increases
-        const newPercentage = this.calculateComponentPercentage(attended, newConducted, tcbr);
-
+        const current = this.calculateComponentPercentage(attended, conducted, tcbr);
+        const next = this.calculateComponentPercentage(attended, conducted + 1, tcbr);
         return {
-            currentPercentage: currentPercentage,
-            newPercentage: newPercentage,
-            percentageDrop: currentPercentage - newPercentage,
-            wouldFallBelowThreshold: currentPercentage >= threshold && newPercentage < threshold,
-            isAlreadyBelowThreshold: currentPercentage < threshold
+            currentPercentage: current,
+            newPercentage: next,
+            percentageDrop: current - next,
+            wouldFallBelowThreshold: current >= threshold && next < threshold,
+            isAlreadyBelowThreshold: current < threshold
         };
     },
 
     /**
-     * Calculate overall subject classes needed/can skip
-     * Based on the average of component percentages
-     * 
-     * @param {Object} components - LTPS components (raw data)
-     * @param {number} threshold - Target percentage
-     * @returns {Object} Calculation results for the subject
+     * Full simulation for a subject — applies simulated bunks as an overlay on `conducted`,
+     * then calculates all component-level and subject-level statistics.
+     *
+     * @param {Object} components      Raw LTPS component map (never mutated)
+     * @param {number} threshold
+     * @param {Object} weightages      Per-type weightage overrides
+     * @param {Object} simulatedBunks  Extra absences to overlay: { L: n, T: n, … }
      */
-    calculateSubjectSimulation(components, threshold, weightages = {}) {
-        const componentTypes = Object.keys(components);
-        if (componentTypes.length === 0) {
-            return { status: 'safe', classesNeeded: 0, canSkip: 0 };
+    calculateSubjectSimulation(components, threshold, weightages = {}, simulatedBunks = {}) {
+        const types = Object.keys(components);
+        if (types.length === 0) return { status: 'safe', classesNeeded: 0, canSkip: 0 };
+
+        // Build a read-only overlay with simulated bunks applied to conducted
+        const overlaid = {};
+        for (const type of types) {
+            const extra = simulatedBunks[type] || 0;
+            overlaid[type] = extra > 0
+                ? { ...components[type], conducted: components[type].conducted + extra }
+                : components[type];
         }
 
-        const currentPercentage = this.calculateSubjectPercentage(components, weightages);
-        const status = this.getStatus(currentPercentage, threshold);
-
-        // Calculate component-wise data
+        const subjectPct = this.calculateSubjectPercentage(overlaid, weightages);
         const componentData = {};
-        let weakestComponent = null;
-        let weakestPercentage = 100;
-        let totalClassesNeeded = 0;
-        let minCanSkip = Infinity;
+        let weakestComponent = null, weakestPct = 101;
+        let totalClassesNeeded = 0, minCanSkip = Infinity;
 
-        for (const type of componentTypes) {
-            const comp = components[type];
+        for (const type of types) {
+            const comp = overlaid[type];
+            const raw = components[type];
             const tcbr = comp.tcbr || 0;
-            const compPercentage = this.calculateComponentPercentage(comp.attended, comp.conducted, tcbr);
-            const compNeeded = this.classesNeededToReachThreshold(comp.attended, comp.conducted, threshold, tcbr);
-            const compCanSkip = this.classesCanSkip(comp.attended, comp.conducted, threshold, tcbr);
-            const simulation = this.simulateMissNextClass(comp.attended, comp.conducted, threshold, tcbr);
+            const extra = simulatedBunks[type] || 0;
+
+            const pct = this.calculateComponentPercentage(comp.attended, comp.conducted, tcbr);
+            const needed = this.classesNeededToReachThreshold(comp.attended, comp.conducted, threshold, tcbr);
+            const canSkip = this.classesCanSkip(comp.attended, comp.conducted, threshold, tcbr);
+            const sim = this.simulateMissNextClass(comp.attended, comp.conducted, threshold, tcbr);
 
             componentData[type] = {
-                percentage: compPercentage,
-                classesNeeded: compNeeded,
-                canSkip: compCanSkip,
-                status: this.getStatus(compPercentage, threshold),
-                nextClassSimulation: simulation,
-                // Include raw values for display
+                percentage: pct,
+                classesNeeded: needed,
+                canSkip,
+                status: this.getStatus(pct, threshold),
+                nextClassSimulation: sim,
                 conducted: comp.conducted,
+                rawConducted: raw.conducted,
                 attended: comp.attended,
                 effectiveAttended: this.getEffectiveAttended(comp.attended, tcbr),
-                tcbr: tcbr
+                tcbr,
+                simulatedBunks: extra
             };
 
-            // Track weakest component
-            if (compPercentage < weakestPercentage) {
-                weakestPercentage = compPercentage;
-                weakestComponent = type;
-            }
-
-            // Track total classes needed
-            if (compNeeded > 0) {
-                totalClassesNeeded += compNeeded;
-            }
-
-            // Track minimum skip capability
-            if (compCanSkip < minCanSkip) {
-                minCanSkip = compCanSkip;
-            }
+            if (pct < weakestPct) { weakestPct = pct; weakestComponent = type; }
+            if (needed > 0 && needed !== Infinity) totalClassesNeeded += needed;
+            if (canSkip < minCanSkip) minCanSkip = canSkip;
         }
 
         return {
-            percentage: currentPercentage,
-            status: status,
-            dangerScore: this.calculateDangerScore(currentPercentage, threshold),
-            componentData: componentData,
-            weakestComponent: weakestComponent,
-            weakestPercentage: weakestPercentage,
-            // For below threshold: sum of all classes needed
-            totalClassesNeeded: Math.min(totalClassesNeeded, 300), // Sanity cap
-            // For above threshold: minimum across all components (bottleneck)
-            canSkip: minCanSkip === Infinity ? 0 : Math.min(minCanSkip, 100), // Sanity cap
-            weightages: weightages
+            percentage: subjectPct,
+            status: this.getStatus(subjectPct, threshold),
+            dangerScore: this.calculateDangerScore(subjectPct, threshold),
+            componentData,
+            weakestComponent,
+            weakestPercentage: weakestPct,
+            totalClassesNeeded: Math.min(totalClassesNeeded, 300),
+            canSkip: minCanSkip === Infinity ? 0 : minCanSkip,
+            weightages
         };
     },
 
     /**
-     * Process all subjects and return enriched data
-     * @param {Object} rawData - Raw scraped data
-     * @param {number} threshold - Attendance threshold
-     * @returns {Array} Processed subjects with calculations
+     * Processes every subject in raw scraped data into enriched result objects.
+     * @param {Object} rawData           Scraped data ({ subjects })
+     * @param {number} threshold
+     * @param {Object} allWeightages     Map of courseCode → weightage overrides
+     * @param {Object} allSimulatedBunks Map of courseCode → simulated bunk counts
+     * @returns {Array}
      */
-    processAllSubjects(rawData, threshold, allWeightages = {}) {
-        if (!rawData || !rawData.subjects) return [];
+    processAllSubjects(rawData, threshold, allWeightages = {}, allSimulatedBunks = {}) {
+        if (!rawData?.subjects) return [];
 
-        const processed = [];
+        return Object.values(rawData.subjects).map(subject => {
+            const sim = this.calculateSubjectSimulation(
+                subject.components,
+                threshold,
+                allWeightages[subject.courseCode] || {},
+                allSimulatedBunks[subject.courseCode] || {}
+            );
 
-        for (const subjectKey of Object.keys(rawData.subjects)) {
-            const subject = rawData.subjects[subjectKey];
-            // Look up weightage by courseCode
-            const subjectWeightages = allWeightages[subject.courseCode] || {};
-            const simulation = this.calculateSubjectSimulation(subject.components, threshold, subjectWeightages);
-
-            // Calculate totals across all components
-            let totalConducted = 0;
-            let totalAttended = 0;
-            let totalEffectiveAttended = 0;
-
-            for (const compType of Object.keys(subject.components)) {
-                const comp = subject.components[compType];
+            let totalConducted = 0, totalAttended = 0, totalEffectiveAttended = 0;
+            for (const comp of Object.values(subject.components)) {
                 totalConducted += comp.conducted;
                 totalAttended += comp.attended;
                 totalEffectiveAttended += this.getEffectiveAttended(comp.attended, comp.tcbr || 0);
             }
 
-            processed.push({
+            return {
                 courseCode: subject.courseCode,
                 courseName: subject.courseName,
                 components: subject.components,
-                totalConducted: totalConducted,
-                totalAttended: totalAttended,
-                totalEffectiveAttended: totalEffectiveAttended,
+                totalConducted,
+                totalAttended,
+                totalEffectiveAttended,
                 totalAbsent: totalConducted - totalAttended,
-                ...simulation
-            });
-        }
-
-        return processed;
+                ...sim
+            };
+        });
     },
 
     /**
-     * Sort subjects by specified criteria
-     * @param {Array} subjects - Processed subjects
-     * @param {string} sortBy - 'danger', 'name', or 'percentage'
-     * @returns {Array} Sorted subjects
+     * Sorts processed subjects.
+     * @param {Array}   subjects
+     * @param {"danger"|"name"|"percentage"} sortBy
      */
     sortSubjects(subjects, sortBy = 'danger') {
         const sorted = [...subjects];
-
         switch (sortBy) {
-            case 'danger':
-                sorted.sort((a, b) => b.dangerScore - a.dangerScore);
-                break;
-            case 'name':
-                sorted.sort((a, b) => a.courseName.localeCompare(b.courseName));
-                break;
-            case 'percentage':
-                sorted.sort((a, b) => a.percentage - b.percentage);
-                break;
-            default:
-                sorted.sort((a, b) => b.dangerScore - a.dangerScore);
+            case 'name': sorted.sort((a, b) => a.courseName.localeCompare(b.courseName)); break;
+            case 'percentage': sorted.sort((a, b) => a.percentage - b.percentage); break;
+            default: sorted.sort((a, b) => b.dangerScore - a.dangerScore);
         }
-
         return sorted;
     },
 
     /**
-     * Calculate aggregate statistics
-     * @param {Array} subjects - Processed subjects
-     * @param {number} threshold - Attendance threshold
-     * @returns {Object} Aggregate stats
+     * Aggregate statistics across all processed subjects.
+     * @param {Array}  subjects
+     * @param {number} threshold
      */
     calculateAggregateStats(subjects, threshold) {
         if (subjects.length === 0) {
-            return {
-                totalSubjects: 0,
-                averageAttendance: 0,
-                safeCount: 0,
-                borderlineCount: 0,
-                criticalCount: 0,
-                mostAtRisk: null
-            };
+            return { totalSubjects: 0, averageAttendance: 0, safeCount: 0, borderlineCount: 0, criticalCount: 0 };
         }
-
-        let totalPercentage = 0;
-        let safeCount = 0;
-        let borderlineCount = 0;
-        let criticalCount = 0;
-        let mostAtRisk = null;
-        let lowestPercentage = 100;
-
-        for (const subject of subjects) {
-            totalPercentage += subject.percentage;
-
-            switch (subject.status) {
-                case 'safe':
-                    safeCount++;
-                    break;
-                case 'borderline':
-                    borderlineCount++;
-                    break;
-                case 'critical':
-                    criticalCount++;
-                    break;
-            }
-
-            if (subject.percentage < lowestPercentage) {
-                lowestPercentage = subject.percentage;
-                mostAtRisk = subject;
-            }
+        let total = 0, safeCount = 0, borderlineCount = 0, criticalCount = 0;
+        for (const s of subjects) {
+            total += s.percentage;
+            if (s.status === 'safe') safeCount++;
+            else if (s.status === 'borderline') borderlineCount++;
+            else criticalCount++;
         }
-
         return {
             totalSubjects: subjects.length,
-            averageAttendance: totalPercentage / subjects.length,
-            safeCount: safeCount,
-            borderlineCount: borderlineCount,
-            criticalCount: criticalCount,
-            mostAtRisk: mostAtRisk
+            averageAttendance: total / subjects.length,
+            safeCount,
+            borderlineCount,
+            criticalCount
         };
     },
 
     /**
-     * Get current mode display text
-     * @returns {string} Current mode description
-     */
-    getModeDisplayText() {
-        return this.attendanceMode === "TCBR_CORRECTED"
-            ? "TCBR-Corrected"
-            : "ERP Standard";
-    },
-
-    /**
-     * Get LTPS type display info
-     * @param {string} type - L, T, P, or S
-     * @returns {Object} Display name and icon
+     * Display metadata for LTPS component types.
+     * @param {"L"|"T"|"P"|"S"} type
      */
     getLTPSInfo(type) {
-        const info = {
-            'L': { name: 'Lecture', icon: '📚', color: '#6366f1' },
-            'T': { name: 'Tutorial', icon: '📝', color: '#8b5cf6' },
-            'P': { name: 'Practical', icon: '🔬', color: '#06b6d4' },
-            'S': { name: 'Skill', icon: '🎯', color: '#10b981' }
+        const INFO = {
+            L: { name: 'Lecture', icon: '📚', color: '#6366f1' },
+            T: { name: 'Tutorial', icon: '📝', color: '#8b5cf6' },
+            P: { name: 'Practical', icon: '🔬', color: '#06b6d4' },
+            S: { name: 'Skill', icon: '🎯', color: '#10b981' }
         };
-        return info[type] || { name: type, icon: '📖', color: '#6b7280' };
+        return INFO[type] ?? { name: type, icon: '📖', color: '#6b7280' };
     }
 };
 
-// Export for use in popup.js
 if (typeof window !== 'undefined') {
     window.AttendanceCalculator = AttendanceCalculator;
     window.DEFAULT_WEIGHTAGES = DEFAULT_WEIGHTAGES;

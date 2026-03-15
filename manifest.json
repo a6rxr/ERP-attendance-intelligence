@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "ERP Attendance Intelligence",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Advanced attendance analytics, predictions, and optimization for KL University ERP",
-  "author": "Student Tools",
+  "author": "Mohammed Abrar Hussain",
   "permissions": [
     "activeTab",
     "storage"
@@ -11,6 +11,7 @@
   "host_permissions": [
     "https://newerp.kluniversity.in/*"
   ],
+  "offline_enabled": true,
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
@@ -29,9 +30,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://newerp.kluniversity.in/*"],
-      "js": ["content.js"],
-      "css": [],
+      "matches": [
+        "https://newerp.kluniversity.in/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_end"
     }
   ]

@@ -76,7 +76,7 @@
           </div>
         </div>
         <div class="setting-item">
-          <label>
+          <label for="sortSelect">
             <span class="setting-label">Sort Subjects By</span>
           </label>
           <select id="sortSelect">
@@ -85,9 +85,20 @@
             <option value="percentage">Attendance (Low to High)</option>
           </select>
         </div>
+        <div class="setting-item">
+          <label for="attendanceModeSelect">
+            <span class="setting-label">Attendance Mode</span>
+            <span class="setting-hint">How to calculate attendance</span>
+          </label>
+          <select id="attendanceModeSelect">
+            <option value="ERP">ERP Standard</option>
+            <option value="TCBR_CORRECTED">TCBR-Corrected</option>
+          </select>
+        </div>
         <button class="save-settings-btn" id="saveSettingsBtn">Save Settings</button>
       </div>
     </div>
+
 
     <!-- Quick Stats Bar -->
     <div class="stats-bar hidden" id="statsBar">
@@ -164,14 +175,13 @@
 
       <!-- Results Container -->
       <div class="results-container hidden" id="resultsContainer">
-        <!-- Alert Banner for Most At-Risk -->
-        <div class="alert-banner hidden" id="alertBanner">
-          <div class="alert-icon">⚠️</div>
-          <div class="alert-content">
-            <strong>Attention Required:</strong>
-            <span id="alertMessage">Subject requires immediate attention</span>
-          </div>
+        <!-- Bunk Simulation Active Banner -->
+        <div class="bunk-sim-bar hidden" id="bunkSimBar">
+          <span class="bunk-sim-bar-icon">🪑</span>
+          <span class="bunk-sim-bar-text" id="bunkSimBarText">Simulation active</span>
+          <button class="bunk-sim-reset-btn" id="bunkSimResetBtn">Reset</button>
         </div>
+
 
         <!-- Subject Cards Container -->
         <div class="subjects-grid" id="subjectsGrid">
@@ -287,6 +297,15 @@
         <div class="component-icon"></div>
         <span class="component-type"></span>
         <span class="component-percentage"></span>
+        <button class="bunk-btn" title="Simulate bunking this class" aria-label="Simulate bunk">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+            <circle cx="9" cy="7" r="4" />
+            <line x1="23" y1="11" x2="17" y2="11" />
+          </svg>
+          <span>Bunk</span>
+        </button>
       </div>
       <div class="component-progress">
         <div class="component-progress-bar">
@@ -296,6 +315,7 @@
       <div class="component-stats">
         <span class="component-attended"></span>
         <span class="component-action"></span>
+        <span class="bunk-sim-badge hidden"></span>
       </div>
     </div>
   </template>
@@ -318,9 +338,7 @@
         </button>
       </div>
 
-      <p class="weightage-modal-desc">Adjust how much each component contributes to the overall attendance score. Higher
-        weightage = more influence.</p>
-
+      <p class="weightage-modal-desc">adjust how much each component contributes to the overall attendance score.</p>
       <div class="weightage-sliders" id="weightageSliders">
         <!-- Sliders injected by popup.js -->
       </div>

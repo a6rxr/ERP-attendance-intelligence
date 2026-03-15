@@ -1,177 +1,100 @@
 /**
- * ERP Attendance Intelligence - Popup Script
- * Main UI controller and event handling
- * 
- * ATTENDANCE MODE:
- * - "ERP" - Uses raw attended value (matches ERP display)
- * - "TCBR_CORRECTED" - Adds TCBR to attended for effective attendance
+ * ERP Attendance Intelligence — Popup Script
+ * UI controller and event handling for the Chrome extension popup.
+ *
+ * Attendance modes:
+ *   "ERP"            — raw attended value (matches ERP display)
+ *   "TCBR_CORRECTED" — adds TCBR to attended for effective attendance
  */
 
-// DOM Elements
-const elements = {
-    // Theme & Settings
-    themeToggle: null,
-    settingsBtn: null,
-    settingsPanel: null,
-    thresholdInput: null,
-    sortSelect: null,
-    saveSettingsBtn: null,
-    attendanceModeSelect: null,
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
 
-    // Stats Bar
-    statsBar: null,
-    totalSubjects: null,
-    avgAttendance: null,
-    safeCount: null,
-    criticalCount: null,
+/** @type {Record<string, Element|null>} Cached DOM element references */
+const el = {};
 
-    // States
-    initialState: null,
-    loadingState: null,
-    errorState: null,
-    resultsContainer: null,
-
-    // Buttons
-    fetchBtn: null,
-    retryBtn: null,
-    refreshBtn: null,
-
-    // Results
-    subjectsGrid: null,
-    alertBanner: null,
-    alertMessage: null,
-    errorMessage: null,
-    lastUpdated: null,
-
-    // Templates
-    subjectCardTemplate: null,
-    componentTemplate: null
-};
-
-// App State
+/** Application state — all mutable runtime data lives here */
 let state = {
     theme: 'light',
     threshold: 75,
     sortBy: 'danger',
-    attendanceMode: 'ERP', // "ERP" or "TCBR_CORRECTED"
+    attendanceMode: 'ERP',
     attendanceData: null,
     processedSubjects: [],
     lastFetched: null,
-    // Per-subject weightage overrides. Key = courseCode, value = { L, T, P, S } (0-100)
-    subjectWeightages: {}
+    subjectWeightages: {},  // courseCode → { L, T, P, S } (0–100)
+    simulatedBunks: {}   // courseCode → { L: n, T: n, … }
 };
 
-// Track which subject's modal is open (courseCode)
+/** Set of course codes whose component accordion is currently expanded */
+const expandedCards = new Set();
+
+/** Course code of the subject whose weightage modal is open, or null */
 let activeWeightageSubject = null;
 
-/**
- * Initialize the popup
- */
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+
 async function init() {
-    // Cache DOM elements
     cacheElements();
-
-    // Inject attendance mode setting if not present
-    injectAttendanceModeSetting();
-
-    // Load saved settings
     await loadSettings();
-
-    // Apply saved theme
     applyTheme(state.theme);
-
-    // Set calculator mode
     AttendanceCalculator.setMode(state.attendanceMode);
-
-    // Set up event listeners
     setupEventListeners();
-
-    // Update UI with saved settings
-    updateSettingsUI();
-
-    // If we have cached data, render it
-    if (state.attendanceData) {
-        renderResults();
-    }
+    syncSettingsUI();
+    if (state.attendanceData) renderResults();
 }
 
-/**
- * Inject the attendance mode setting into the settings panel
- */
-function injectAttendanceModeSetting() {
-    const settingsContent = document.querySelector('.settings-content');
-    if (!settingsContent) return;
+// ---------------------------------------------------------------------------
+// DOM caching
+// ---------------------------------------------------------------------------
 
-    // Check if already injected
-    if (document.getElementById('attendanceModeSelect')) return;
-
-    // Create the attendance mode setting
-    const settingItem = document.createElement('div');
-    settingItem.className = 'setting-item';
-    settingItem.innerHTML = `
-    <label>
-      <span class="setting-label">Attendance Mode</span>
-      <span class="setting-hint">How to calculate attendance</span>
-    </label>
-    <select id="attendanceModeSelect">
-      <option value="ERP">ERP Standard</option>
-      <option value="TCBR_CORRECTED">TCBR-Corrected</option>
-    </select>
-  `;
-
-    // Insert before the save button
-    const saveBtn = settingsContent.querySelector('.save-settings-btn');
-    if (saveBtn) {
-        settingsContent.insertBefore(settingItem, saveBtn);
-    } else {
-        settingsContent.appendChild(settingItem);
-    }
-}
-
-/**
- * Cache all DOM elements for performance
- */
 function cacheElements() {
-    elements.themeToggle = document.getElementById('themeToggle');
-    elements.settingsBtn = document.getElementById('settingsBtn');
-    elements.settingsPanel = document.getElementById('settingsPanel');
-    elements.thresholdInput = document.getElementById('thresholdInput');
-    elements.sortSelect = document.getElementById('sortSelect');
-    elements.saveSettingsBtn = document.getElementById('saveSettingsBtn');
-    elements.attendanceModeSelect = document.getElementById('attendanceModeSelect');
-
-    elements.statsBar = document.getElementById('statsBar');
-    elements.totalSubjects = document.getElementById('totalSubjects');
-    elements.avgAttendance = document.getElementById('avgAttendance');
-    elements.safeCount = document.getElementById('safeCount');
-    elements.criticalCount = document.getElementById('criticalCount');
-
-    elements.initialState = document.getElementById('initialState');
-    elements.loadingState = document.getElementById('loadingState');
-    elements.errorState = document.getElementById('errorState');
-    elements.resultsContainer = document.getElementById('resultsContainer');
-
-    elements.fetchBtn = document.getElementById('fetchBtn');
-    elements.retryBtn = document.getElementById('retryBtn');
-    elements.refreshBtn = document.getElementById('refreshBtn');
-
-    elements.subjectsGrid = document.getElementById('subjectsGrid');
-    elements.alertBanner = document.getElementById('alertBanner');
-    elements.alertMessage = document.getElementById('alertMessage');
-    elements.errorMessage = document.getElementById('errorMessage');
-    elements.lastUpdated = document.getElementById('lastUpdated');
-
-    elements.subjectCardTemplate = document.getElementById('subjectCardTemplate');
-    elements.componentTemplate = document.getElementById('componentTemplate');
+    const $ = id => document.getElementById(id);
+    Object.assign(el, {
+        themeToggle: $('themeToggle'),
+        settingsBtn: $('settingsBtn'),
+        settingsPanel: $('settingsPanel'),
+        thresholdInput: $('thresholdInput'),
+        sortSelect: $('sortSelect'),
+        attendanceModeSelect: $('attendanceModeSelect'),
+        saveSettingsBtn: $('saveSettingsBtn'),
+        statsBar: $('statsBar'),
+        totalSubjects: $('totalSubjects'),
+        avgAttendance: $('avgAttendance'),
+        safeCount: $('safeCount'),
+        criticalCount: $('criticalCount'),
+        initialState: $('initialState'),
+        loadingState: $('loadingState'),
+        errorState: $('errorState'),
+        resultsContainer: $('resultsContainer'),
+        fetchBtn: $('fetchBtn'),
+        retryBtn: $('retryBtn'),
+        refreshBtn: $('refreshBtn'),
+        subjectsGrid: $('subjectsGrid'),
+        errorMessage: $('errorMessage'),
+        lastUpdated: $('lastUpdated'),
+        subjectCardTemplate: $('subjectCardTemplate'),
+        componentTemplate: $('componentTemplate'),
+        bunkSimBar: $('bunkSimBar'),
+        bunkSimBarText: $('bunkSimBarText'),
+        bunkSimResetBtn: $('bunkSimResetBtn')
+    });
 }
 
-/**
- * Load settings from chrome.storage
- */
-async function loadSettings() {
-    return new Promise((resolve) => {
+// ---------------------------------------------------------------------------
+// Persistence
+// ---------------------------------------------------------------------------
+
+const STORAGE_KEYS = ['theme', 'threshold', 'sortBy', 'attendanceMode', 'lastData', 'subjectWeightages'];
+const SAFE_STATE_KEYS = ['theme', 'threshold', 'sortBy', 'attendanceMode', 'subjectWeightages'];
+
+function loadSettings() {
+    return new Promise(resolve => {
         if (typeof chrome !== 'undefined' && chrome.storage) {
-            chrome.storage.local.get(['theme', 'threshold', 'sortBy', 'attendanceMode', 'lastData', 'subjectWeightages'], (result) => {
+            chrome.storage.local.get(STORAGE_KEYS, result => {
                 if (result.theme) state.theme = result.theme;
                 if (result.threshold) state.threshold = result.threshold;
                 if (result.sortBy) state.sortBy = result.sortBy;
@@ -184,642 +107,476 @@ async function loadSettings() {
                 resolve();
             });
         } else {
-            // Fallback for testing outside extension context
-            const saved = localStorage.getItem('erpAttendanceSettings');
-            if (saved) {
-                try {
-                    const parsed = JSON.parse(saved);
-                    state = { ...state, ...parsed };
-                } catch (e) {
-                    // Fail silently, use defaults
+            // Dev/testing fallback — only merge known safe keys to prevent prototype pollution
+            try {
+                const saved = JSON.parse(localStorage.getItem('erpAttendanceSettings') || 'null');
+                if (saved && typeof saved === 'object') {
+                    for (const key of SAFE_STATE_KEYS) {
+                        if (key in saved) state[key] = saved[key];
+                    }
                 }
-            }
+            } catch { /* use defaults */ }
             resolve();
         }
     });
 }
 
-/**
- * Save settings to chrome.storage
- */
-async function saveSettings() {
-    const settingsToSave = {
+function saveSettings() {
+    const payload = {
         theme: state.theme,
         threshold: state.threshold,
         sortBy: state.sortBy,
         attendanceMode: state.attendanceMode,
         subjectWeightages: state.subjectWeightages
     };
-
     if (typeof chrome !== 'undefined' && chrome.storage) {
-        chrome.storage.local.set(settingsToSave);
+        chrome.storage.local.set(payload);
     } else {
-        localStorage.setItem('erpAttendanceSettings', JSON.stringify(settingsToSave));
+        localStorage.setItem('erpAttendanceSettings', JSON.stringify(payload));
     }
 }
 
-/**
- * Save attendance data for persistence
- */
-async function saveAttendanceData() {
+function saveAttendanceData() {
     if (!state.attendanceData) return;
-
-    const dataToSave = {
-        lastData: {
-            data: state.attendanceData,
-            timestamp: state.lastFetched
-        }
-    };
-
     if (typeof chrome !== 'undefined' && chrome.storage) {
-        chrome.storage.local.set(dataToSave);
+        chrome.storage.local.set({ lastData: { data: state.attendanceData, timestamp: state.lastFetched } });
     }
 }
 
-/**
- * Set up all event listeners
- */
+// ---------------------------------------------------------------------------
+// Event listeners
+// ---------------------------------------------------------------------------
+
 function setupEventListeners() {
-    // Theme toggle
-    elements.themeToggle.addEventListener('click', toggleTheme);
+    el.themeToggle.addEventListener('click', toggleTheme);
+    el.settingsBtn.addEventListener('click', () => el.settingsPanel.classList.toggle('hidden'));
+    el.saveSettingsBtn.addEventListener('click', handleSaveSettings);
 
-    // Settings panel
-    elements.settingsBtn.addEventListener('click', toggleSettings);
-    elements.saveSettingsBtn.addEventListener('click', handleSaveSettings);
+    for (const btn of [el.fetchBtn, el.retryBtn, el.refreshBtn]) {
+        btn.addEventListener('click', fetchAttendanceData);
+    }
 
-    // Fetch buttons
-    elements.fetchBtn.addEventListener('click', fetchAttendanceData);
-    elements.retryBtn.addEventListener('click', fetchAttendanceData);
-    elements.refreshBtn.addEventListener('click', fetchAttendanceData);
-
-    // Weightage modal
     document.getElementById('weightageModalClose').addEventListener('click', closeWeightageModal);
     document.getElementById('weightageApplyBtn').addEventListener('click', applyWeightages);
     document.getElementById('weightageResetBtn').addEventListener('click', resetWeightages);
-    document.getElementById('weightageModalOverlay').addEventListener('click', (e) => {
+    document.getElementById('weightageModalOverlay').addEventListener('click', e => {
         if (e.target === e.currentTarget) closeWeightageModal();
     });
 
-    // Keyboard accessibility
-    document.addEventListener('keydown', (e) => {
+    el.bunkSimResetBtn.addEventListener('click', resetBunkSimulations);
+
+    document.addEventListener('keydown', e => {
         if (e.key === 'Escape') {
-            elements.settingsPanel.classList.add('hidden');
+            el.settingsPanel.classList.add('hidden');
             closeWeightageModal();
         }
     });
 }
 
-/**
- * Update settings UI with current state
- */
-function updateSettingsUI() {
-    elements.thresholdInput.value = state.threshold;
-    elements.sortSelect.value = state.sortBy;
+// ---------------------------------------------------------------------------
+// Settings UI
+// ---------------------------------------------------------------------------
 
-    // Re-cache attendance mode select after injection
-    elements.attendanceModeSelect = document.getElementById('attendanceModeSelect');
-    if (elements.attendanceModeSelect) {
-        elements.attendanceModeSelect.value = state.attendanceMode;
-    }
+function syncSettingsUI() {
+    el.thresholdInput.value = state.threshold;
+    el.sortSelect.value = state.sortBy;
+    el.attendanceModeSelect.value = state.attendanceMode;
 }
 
-/**
- * Toggle between light and dark theme
- */
+function handleSaveSettings() {
+    const newThreshold = parseInt(el.thresholdInput.value, 10);
+    if (isNaN(newThreshold) || newThreshold < 0 || newThreshold > 100) {
+        el.thresholdInput.classList.add('input-error');
+        setTimeout(() => el.thresholdInput.classList.remove('input-error'), 1000);
+        return;
+    }
+
+    const modeChanged = state.attendanceMode !== el.attendanceModeSelect.value;
+    state.threshold = newThreshold;
+    state.sortBy = el.sortSelect.value;
+    state.attendanceMode = el.attendanceModeSelect.value;
+
+    AttendanceCalculator.setMode(state.attendanceMode);
+    saveSettings();
+    el.settingsPanel.classList.add('hidden');
+
+    if (state.attendanceData) renderResults();
+    showToast(modeChanged ? `Mode: ${AttendanceCalculator.getModeDisplayText()}` : 'Settings saved!');
+}
+
+// ---------------------------------------------------------------------------
+// Theme
+// ---------------------------------------------------------------------------
+
 function toggleTheme() {
     state.theme = state.theme === 'light' ? 'dark' : 'light';
     applyTheme(state.theme);
     saveSettings();
 }
 
-/**
- * Apply theme to document
- */
 function applyTheme(theme) {
-    document.body.classList.remove('light-theme', 'dark-theme');
-    document.body.classList.add(`${theme}-theme`);
+    document.body.classList.toggle('dark-theme', theme === 'dark');
+    document.body.classList.toggle('light-theme', theme === 'light');
 }
 
-/**
- * Toggle settings panel visibility
- */
-function toggleSettings() {
-    elements.settingsPanel.classList.toggle('hidden');
-}
+// ---------------------------------------------------------------------------
+// View state
+// ---------------------------------------------------------------------------
 
 /**
- * Handle save settings button click
+ * Switches between: 'initial' | 'loading' | 'error' | 'results'
+ * @param {string} viewName
  */
-function handleSaveSettings() {
-    const newThreshold = parseInt(elements.thresholdInput.value, 10);
-    const newSort = elements.sortSelect.value;
+function showView(viewName) {
+    el.initialState.classList.add('hidden');
+    el.loadingState.classList.add('hidden');
+    el.errorState.classList.add('hidden');
+    el.resultsContainer.classList.add('hidden');
+    el.statsBar.classList.add('hidden');
+    el.refreshBtn.classList.add('hidden');
 
-    // Re-cache in case it wasn't available during init
-    elements.attendanceModeSelect = document.getElementById('attendanceModeSelect');
-    const newMode = elements.attendanceModeSelect ? elements.attendanceModeSelect.value : state.attendanceMode;
-
-    // Validate threshold
-    if (isNaN(newThreshold) || newThreshold < 0 || newThreshold > 100) {
-        elements.thresholdInput.classList.add('input-error');
-        setTimeout(() => elements.thresholdInput.classList.remove('input-error'), 1000);
-        return;
-    }
-
-    // Check if mode changed
-    const modeChanged = state.attendanceMode !== newMode;
-
-    state.threshold = newThreshold;
-    state.sortBy = newSort;
-    state.attendanceMode = newMode;
-
-    // Update calculator mode
-    AttendanceCalculator.setMode(state.attendanceMode);
-
-    saveSettings();
-
-    // Re-render if we have data
-    if (state.attendanceData) {
-        renderResults();
-    }
-
-    // Close panel with animation
-    elements.settingsPanel.classList.add('hidden');
-
-    // Show save confirmation with mode info if changed
-    if (modeChanged) {
-        showToast(`Mode: ${AttendanceCalculator.getModeDisplayText()}`);
-    } else {
-        showToast('Settings saved!');
-    }
-}
-
-/**
- * Show a toast notification
- */
-function showToast(message) {
-    const toast = document.createElement('div');
-    toast.className = 'toast';
-    toast.textContent = message;
-    document.body.appendChild(toast);
-
-    setTimeout(() => {
-        toast.classList.add('show');
-    }, 10);
-
-    setTimeout(() => {
-        toast.classList.remove('show');
-        setTimeout(() => toast.remove(), 300);
-    }, 2000);
-}
-
-/**
- * Show a specific state (initial, loading, error, or results)
- */
-function showState(stateName) {
-    elements.initialState.classList.add('hidden');
-    elements.loadingState.classList.add('hidden');
-    elements.errorState.classList.add('hidden');
-    elements.resultsContainer.classList.add('hidden');
-    elements.statsBar.classList.add('hidden');
-
-    switch (stateName) {
-        case 'initial':
-            elements.initialState.classList.remove('hidden');
-            elements.refreshBtn.classList.add('hidden');
-            break;
-        case 'loading':
-            elements.loadingState.classList.remove('hidden');
-            break;
-        case 'error':
-            elements.errorState.classList.remove('hidden');
-            elements.refreshBtn.classList.add('hidden');
-            break;
+    switch (viewName) {
+        case 'initial': el.initialState.classList.remove('hidden'); break;
+        case 'loading': el.loadingState.classList.remove('hidden'); break;
+        case 'error': el.errorState.classList.remove('hidden'); break;
         case 'results':
-            elements.resultsContainer.classList.remove('hidden');
-            elements.statsBar.classList.remove('hidden');
-            elements.refreshBtn.classList.remove('hidden');
+            el.resultsContainer.classList.remove('hidden');
+            el.statsBar.classList.remove('hidden');
+            el.refreshBtn.classList.remove('hidden');
             break;
     }
 }
 
-/**
- * Fetch attendance data from content script
- */
+// ---------------------------------------------------------------------------
+// Data fetching
+// ---------------------------------------------------------------------------
+
 async function fetchAttendanceData() {
-    showState('loading');
-
+    showView('loading');
     try {
-        // Get active tab
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-        if (!tab) {
-            throw new Error('No active tab found.');
-        }
-
-        // Check if we're on the correct domain
-        if (!tab.url || !tab.url.includes('newerp.kluniversity.in')) {
+        if (!tab) throw new Error('No active tab found.');
+        if (!tab.url?.includes('newerp.kluniversity.in')) {
             throw new Error('Please navigate to the KL University ERP attendance page first.');
         }
 
-        // Send message to content script
         let response;
         try {
             response = await chrome.tabs.sendMessage(tab.id, { action: 'fetchAttendance' });
-        } catch (msgError) {
+        } catch {
             throw new Error('ERP page not ready. Please refresh the page and try again.');
         }
 
-        if (!response) {
-            throw new Error('Could not communicate with the page. Please refresh and try again.');
+        if (!response?.success) {
+            throw new Error(response?.error || 'Failed to fetch attendance data.');
         }
 
-        if (!response.success) {
-            throw new Error(response.error || 'Failed to fetch attendance data.');
-        }
-
-        // Store the data
         state.attendanceData = response.data;
         state.lastFetched = new Date().toISOString();
-
-        // Save for persistence
+        state.simulatedBunks = {}; // Clear simulations on fresh fetch
         saveAttendanceData();
-
-        // Render results
         renderResults();
-
     } catch (error) {
-        // console.error('Fetch error:', error); // Removed for production
-        elements.errorMessage.textContent = error.message || 'An unexpected error occurred.';
-        showState('error');
+        el.errorMessage.textContent = error.message || 'An unexpected error occurred.';
+        showView('error');
     }
 }
 
-/**
- * Render all results
- */
-function renderResults() {
-    if (!state.attendanceData) {
-        showState('initial');
-        return;
-    }
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
 
-    // Ensure calculator is using current mode
+function renderResults() {
+    if (!state.attendanceData) { showView('initial'); return; }
+
     AttendanceCalculator.setMode(state.attendanceMode);
 
-    // Process subjects with calculations (pass per-subject weightages)
-    state.processedSubjects = AttendanceCalculator.processAllSubjects(
-        state.attendanceData,
-        state.threshold,
-        state.subjectWeightages
-    );
-
-    // Sort subjects
     state.processedSubjects = AttendanceCalculator.sortSubjects(
-        state.processedSubjects,
+        AttendanceCalculator.processAllSubjects(
+            state.attendanceData,
+            state.threshold,
+            state.subjectWeightages,
+            state.simulatedBunks
+        ),
         state.sortBy
     );
 
-    // Calculate aggregate stats
-    const stats = AttendanceCalculator.calculateAggregateStats(
-        state.processedSubjects,
-        state.threshold
-    );
-
-    // Update stats bar
+    const stats = AttendanceCalculator.calculateAggregateStats(state.processedSubjects, state.threshold);
     updateStatsBar(stats);
-
-    // Update alert banner if needed
-    updateAlertBanner(stats);
-
-    // Render subject cards
     renderSubjectCards();
-
-    // Update last updated time
+    updateBunkSimBar();
     updateLastUpdated();
-
-    // Show results
-    showState('results');
+    showView('results');
 }
 
-/**
- * Update stats bar with aggregate data
- */
 function updateStatsBar(stats) {
-    elements.totalSubjects.textContent = stats.totalSubjects;
-    elements.avgAttendance.textContent = `${stats.averageAttendance.toFixed(1)}%`;
-    elements.safeCount.textContent = stats.safeCount;
-    elements.criticalCount.textContent = stats.criticalCount + stats.borderlineCount;
+    el.totalSubjects.textContent = stats.totalSubjects;
+    el.avgAttendance.textContent = `${stats.averageAttendance.toFixed(1)}%`;
+    el.safeCount.textContent = stats.safeCount;
+    el.criticalCount.textContent = stats.criticalCount + stats.borderlineCount;
 }
 
-/**
- * Update alert banner for most at-risk subject
- */
-function updateAlertBanner(stats) {
-    if (stats.mostAtRisk && stats.mostAtRisk.status === 'critical') {
-        const subject = stats.mostAtRisk;
-        const needed = subject.totalClassesNeeded;
-        elements.alertMessage.textContent =
-            `${subject.courseName} is at ${subject.percentage.toFixed(1)}%. ` +
-            (needed > 0 ? `Attend ${needed} more class${needed !== 1 ? 'es' : ''} to recover.` : '');
-        elements.alertBanner.classList.remove('hidden');
-    } else {
-        elements.alertBanner.classList.add('hidden');
-    }
-}
-
-/**
- * Render all subject cards
- */
 function renderSubjectCards() {
-    // Clear existing cards
-    elements.subjectsGrid.innerHTML = '';
-
-    // Create cards for each subject
+    el.subjectsGrid.innerHTML = '';
+    const fragment = document.createDocumentFragment();
     for (const subject of state.processedSubjects) {
-        const card = createSubjectCard(subject);
-        elements.subjectsGrid.appendChild(card);
+        fragment.appendChild(createSubjectCard(subject));
     }
+    el.subjectsGrid.appendChild(fragment);
 }
 
-/**
- * Create a subject card element
- */
-function createSubjectCard(subject) {
-    const template = elements.subjectCardTemplate.content.cloneNode(true);
-    const card = template.querySelector('.subject-card');
+// ---------------------------------------------------------------------------
+// Subject card
+// ---------------------------------------------------------------------------
 
-    // Add status class
+function createSubjectCard(subject) {
+    const card = el.subjectCardTemplate.content.cloneNode(true).querySelector('.subject-card');
     card.classList.add(`status-${subject.status}`);
 
-    // Subject info
     card.querySelector('.subject-name').textContent = subject.courseName;
     card.querySelector('.subject-code').textContent = subject.courseCode;
 
-    // Status badge
     const badge = card.querySelector('.status-badge');
-    const badgeText = card.querySelector('.badge-text');
     badge.classList.add(`badge-${subject.status}`);
-    badgeText.textContent = getStatusLabel(subject.status);
+    badge.querySelector('.badge-text').textContent = STATUS_LABELS[subject.status] ?? subject.status;
 
-    // Percentage display
+    // Percentage & progress
     card.querySelector('.percentage-value').textContent = subject.percentage.toFixed(1);
+    const fill = card.querySelector('.progress-fill');
+    fill.style.width = `${Math.min(100, Math.max(0, subject.percentage))}%`;
+    fill.classList.add(`fill-${subject.status}`);
+    const marker = card.querySelector('.threshold-marker');
+    const labelT = card.querySelector('.label-threshold');
+    marker.style.left = labelT.style.left = `${state.threshold}%`;
+    labelT.textContent = `${state.threshold}%`;
 
-    // Progress bar
-    const progressFill = card.querySelector('.progress-fill');
-    const thresholdMarker = card.querySelector('.threshold-marker');
-    const labelThreshold = card.querySelector('.label-threshold');
-    progressFill.style.width = `${Math.min(100, Math.max(0, subject.percentage))}%`;
-    progressFill.classList.add(`fill-${subject.status}`);
-    thresholdMarker.style.left = `${state.threshold}%`;
-    labelThreshold.style.left = `${state.threshold}%`;
-    labelThreshold.textContent = `${state.threshold}%`;
-
-    // Summary values - show effective values based on mode
+    // Summary counts
+    const isEffective = state.attendanceMode === 'TCBR_CORRECTED';
     card.querySelector('.conducted-value').textContent = subject.totalConducted;
-    card.querySelector('.attended-value').textContent =
-        state.attendanceMode === 'TCBR_CORRECTED'
-            ? subject.totalEffectiveAttended
-            : subject.totalAttended;
+    card.querySelector('.attended-value').textContent = isEffective ? subject.totalEffectiveAttended : subject.totalAttended;
     card.querySelector('.absent-value').textContent = subject.totalAbsent;
 
     // Action message
-    const actionIcon = card.querySelector('.action-icon');
-    const actionText = card.querySelector('.action-text');
-    const actionMessage = card.querySelector('.action-message');
+    setActionMessage(card, subject);
 
-    if (subject.status === 'critical' || subject.percentage < state.threshold) {
-        actionIcon.textContent = '📈';
-        const needed = subject.totalClassesNeeded;
+    // Components accordion
+    buildComponentsSection(card, subject);
 
-        if (needed === Infinity) {
-            actionText.textContent = `Impossible to reach ${state.threshold}% (missed classes are permanent)`;
-            actionMessage.classList.add('action-impossible');
-            // Add CSS class for impossible state if not exists, reusing critical style for now
-            actionMessage.style.backgroundColor = 'var(--bg-secondary)';
-            actionMessage.style.border = '1px solid var(--border-strong)';
-            actionText.style.color = 'var(--text-tertiary)';
-        } else {
-            // For very large numbers, show as 200+
-            const displayNeeded = needed > 200 ? '200+' : needed;
-            actionText.textContent = `Attend ${displayNeeded} more class${needed !== 1 ? 'es' : ''} to reach ${state.threshold}%`;
-            actionMessage.classList.add('action-attend');
-        }
-    } else {
-        actionIcon.textContent = '✨';
-        const canSkip = Math.min(subject.canSkip, 100); // Sanity display cap
-        actionText.textContent = canSkip > 0
-            ? `You can skip ${canSkip} class${canSkip !== 1 ? 'es' : ''} safely`
-            : 'Stay on track - no room to skip';
-        actionMessage.classList.add('action-skip');
-    }
+    // Simulation warning
+    setSimulationWarning(card, subject);
 
-    // Components section
-    const componentsGrid = card.querySelector('.components-grid');
-    const componentsHeader = card.querySelector('.components-header');
-
-    // Add component items
-    for (const type of Object.keys(subject.componentData)) {
-        const compData = subject.componentData[type];
-        const componentEl = createComponentItem(type, compData);
-        componentsGrid.appendChild(componentEl);
-    }
-
-    // Toggle components visibility
-    componentsHeader.addEventListener('click', () => {
-        componentsGrid.classList.toggle('collapsed');
-        componentsHeader.classList.toggle('expanded');
-    });
-
-    // Simulation warning (if missing next class would be critical)
-    if (subject.status !== 'critical') {
-        const weakestType = subject.weakestComponent;
-        if (weakestType && subject.componentData[weakestType]) {
-            const sim = subject.componentData[weakestType].nextClassSimulation;
-            if (sim && sim.wouldFallBelowThreshold) {
-                const warning = card.querySelector('.simulation-warning');
-                warning.querySelector('.warning-text').textContent =
-                    `⚠️ Missing next ${AttendanceCalculator.getLTPSInfo(weakestType).name} class would drop you below ${state.threshold}%`;
-                warning.classList.remove('hidden');
-            }
-        }
-    }
+    // Bunk indicator on card
+    const subjectBunks = state.simulatedBunks[subject.courseCode] || {};
+    if (Object.values(subjectBunks).some(n => n > 0)) card.classList.add('has-sim');
 
     // Weightage button
-    const weightageBtn = card.querySelector('.weightage-btn');
-    const weightageCustomBadge = weightageBtn.querySelector('.weightage-custom-badge');
-    // Show 'Custom' badge if this subject has custom weightages
-    if (state.subjectWeightages[subject.courseCode] && Object.keys(state.subjectWeightages[subject.courseCode]).length > 0) {
-        weightageCustomBadge.classList.remove('hidden');
+    const wBtn = card.querySelector('.weightage-btn');
+    if (state.subjectWeightages[subject.courseCode]) {
+        wBtn.querySelector('.weightage-custom-badge').classList.remove('hidden');
     }
-    weightageBtn.addEventListener('click', () => openWeightageModal(subject));
+    wBtn.addEventListener('click', () => openWeightageModal(subject));
 
     return card;
 }
 
-/**
- * Create a component item element
- */
-function createComponentItem(type, compData) {
-    const template = elements.componentTemplate.content.cloneNode(true);
-    const item = template.querySelector('.component-item');
+const STATUS_LABELS = { safe: '🟢 Safe', borderline: '🟡 Borderline', critical: '🔴 Critical' };
 
+function setActionMessage(card, subject) {
+    const icon = card.querySelector('.action-icon');
+    const text = card.querySelector('.action-text');
+    const msg = card.querySelector('.action-message');
+
+    if (subject.percentage < state.threshold) {
+        icon.textContent = '📈';
+        msg.classList.add('action-attend');
+        const needed = subject.totalClassesNeeded;
+        if (needed === Infinity) {
+            text.textContent = `Impossible to reach ${state.threshold}% — missed classes are permanent`;
+            msg.classList.add('action-impossible');
+        } else {
+            const n = Math.min(needed, 200);
+            text.textContent = `Attend ${n}${needed > 200 ? '+' : ''} more class${n !== 1 ? 'es' : ''} to reach ${state.threshold}%`;
+        }
+    } else {
+        icon.textContent = '✨';
+        msg.classList.add('action-skip');
+        const skip = Math.min(subject.canSkip, 100);
+        text.textContent = skip > 0
+            ? `You can skip ${skip} class${skip !== 1 ? 'es' : ''} safely`
+            : 'Stay on track — no room to skip';
+    }
+}
+
+function buildComponentsSection(card, subject) {
+    const grid = card.querySelector('.components-grid');
+    const header = card.querySelector('.components-header');
+
+    if (expandedCards.has(subject.courseCode)) {
+        grid.classList.remove('collapsed');
+        header.classList.add('expanded');
+    }
+
+    for (const [type, compData] of Object.entries(subject.componentData)) {
+        grid.appendChild(createComponentItem(type, compData, subject));
+    }
+
+    header.addEventListener('click', () => {
+        const collapsed = grid.classList.toggle('collapsed');
+        header.classList.toggle('expanded', !collapsed);
+        collapsed ? expandedCards.delete(subject.courseCode) : expandedCards.add(subject.courseCode);
+    });
+}
+
+function setSimulationWarning(card, subject) {
+    if (subject.status === 'critical') return;
+    const weakType = subject.weakestComponent;
+    if (!weakType) return;
+    const sim = subject.componentData[weakType]?.nextClassSimulation;
+    if (!sim?.wouldFallBelowThreshold) return;
+
+    const warning = card.querySelector('.simulation-warning');
+    warning.querySelector('.warning-text').textContent =
+        `Missing next ${AttendanceCalculator.getLTPSInfo(weakType).name} class would drop you below ${state.threshold}%`;
+    warning.classList.remove('hidden');
+}
+
+// ---------------------------------------------------------------------------
+// Component item
+// ---------------------------------------------------------------------------
+
+function createComponentItem(type, compData, subject) {
+    const item = el.componentTemplate.content.cloneNode(true).querySelector('.component-item');
     const ltpsInfo = AttendanceCalculator.getLTPSInfo(type);
+    const isEffective = state.attendanceMode === 'TCBR_CORRECTED';
 
-    // Add status class
     item.classList.add(`comp-${compData.status}`);
-
-    // Component header
     item.querySelector('.component-icon').textContent = ltpsInfo.icon;
     item.querySelector('.component-type').textContent = ltpsInfo.name;
     item.querySelector('.component-percentage').textContent = `${compData.percentage.toFixed(1)}%`;
 
-    // Progress bar
-    const progressFill = item.querySelector('.component-progress-fill');
-    progressFill.style.width = `${Math.min(100, Math.max(0, compData.percentage))}%`;
-    progressFill.style.backgroundColor = ltpsInfo.color;
+    const fill = item.querySelector('.component-progress-fill');
+    fill.style.width = `${Math.min(100, Math.max(0, compData.percentage))}%`;
+    fill.style.backgroundColor = ltpsInfo.color;
 
-    // Stats - show effective attended in TCBR_CORRECTED mode
-    const displayAttended = state.attendanceMode === 'TCBR_CORRECTED'
-        ? compData.effectiveAttended
-        : compData.attended;
-    item.querySelector('.component-attended').textContent =
-        `${displayAttended}/${compData.conducted}`;
+    const displayed = isEffective ? compData.effectiveAttended : compData.attended;
+    item.querySelector('.component-attended').textContent = `${displayed}/${compData.conducted}`;
 
-    const actionSpan = item.querySelector('.component-action');
-    if (compData.classesNeeded > 0) {
-        if (compData.classesNeeded === Infinity) {
-            actionSpan.textContent = 'Impossible';
-            actionSpan.classList.add('need-classes'); // Reuse style or add specific one
-            actionSpan.style.color = 'var(--text-tertiary)';
-        } else {
-            const needed = Math.min(compData.classesNeeded, 100); // Sanity cap for display
-            actionSpan.textContent = `+${needed} needed`;
-            actionSpan.classList.add('need-classes');
-        }
+    const action = item.querySelector('.component-action');
+    if (compData.classesNeeded === Infinity) {
+        action.textContent = 'Impossible';
+        action.style.color = 'var(--text-tertiary)';
+    } else if (compData.classesNeeded > 0) {
+        action.textContent = `+${Math.min(compData.classesNeeded, 100)} needed`;
+        action.classList.add('need-classes');
     } else if (compData.canSkip > 0) {
-        const skip = Math.min(compData.canSkip, 50); // Sanity cap for display
-        actionSpan.textContent = `${skip} skippable`;
-        actionSpan.classList.add('can-skip');
+        action.textContent = `${Math.min(compData.canSkip, 50)} skippable`;
+        action.classList.add('can-skip');
     } else {
-        actionSpan.textContent = 'On track';
-        actionSpan.classList.add('on-track');
+        action.textContent = 'On track';
+        action.classList.add('on-track');
     }
+
+    if (compData.simulatedBunks > 0) {
+        const badge = item.querySelector('.bunk-sim-badge');
+        badge.textContent = `-${compData.simulatedBunks} simulated`;
+        badge.classList.remove('hidden');
+    }
+
+    item.querySelector('.bunk-btn').addEventListener('click', e => {
+        e.stopPropagation();
+        handleBunkClick(subject.courseCode, type, e.currentTarget);
+    });
 
     return item;
 }
 
-/**
- * Get human-readable status label
- */
-function getStatusLabel(status) {
-    switch (status) {
-        case 'safe': return '🟢 Safe';
-        case 'borderline': return '🟡 Borderline';
-        case 'critical': return '🔴 Critical';
-        default: return status;
+// ---------------------------------------------------------------------------
+// Bunk simulation
+// ---------------------------------------------------------------------------
+
+function handleBunkClick(courseCode, type, btnEl) {
+    (state.simulatedBunks[courseCode] ??= {})[type] =
+        (state.simulatedBunks[courseCode][type] || 0) + 1;
+    spawnBunkFloat(btnEl);
+    renderResults();
+}
+
+function resetBunkSimulations() {
+    state.simulatedBunks = {};
+    renderResults();
+    showToast('Simulations cleared');
+}
+
+function spawnBunkFloat(anchor) {
+    const rect = anchor.getBoundingClientRect();
+    const label = Object.assign(document.createElement('div'), {
+        className: 'bunk-float-label',
+        textContent: '-1 bunk'
+    });
+    document.body.appendChild(label);
+    label.style.left = `${rect.left + window.scrollX + (rect.width - label.offsetWidth) / 2}px`;
+    label.style.top = `${rect.top + window.scrollY - 4}px`;
+    label.addEventListener('animationend', () => label.remove(), { once: true });
+}
+
+function updateBunkSimBar() {
+    let total = 0, subjects = 0;
+    for (const bunks of Object.values(state.simulatedBunks)) {
+        const sum = Object.values(bunks).reduce((a, b) => a + b, 0);
+        if (sum > 0) { total += sum; subjects++; }
+    }
+    const visible = total > 0;
+    el.bunkSimBar.classList.toggle('hidden', !visible);
+    if (visible) {
+        el.bunkSimBarText.textContent =
+            `Simulating ${total} bunk${total !== 1 ? 's' : ''} across ${subjects} subject${subjects !== 1 ? 's' : ''}`;
     }
 }
 
-/**
- * Update last updated timestamp
- */
-function updateLastUpdated() {
-    if (state.lastFetched) {
-        const date = new Date(state.lastFetched);
-        const modeLabel = state.attendanceMode === 'TCBR_CORRECTED' ? ' (TCBR)' : '';
-        elements.lastUpdated.textContent = formatRelativeTime(date) + modeLabel;
-    }
-}
+// ---------------------------------------------------------------------------
+// Weightage modal
+// ---------------------------------------------------------------------------
 
-/**
- * Format date as relative time
- */
-function formatRelativeTime(date) {
-    const now = new Date();
-    const diffMs = now - date;
-    const diffMins = Math.floor(diffMs / 60000);
-
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-
-    const diffDays = Math.floor(diffHours / 24);
-    return `${diffDays}d ago`;
-}
-
-// =============================================
-// WEIGHTAGE MODAL LOGIC
-// =============================================
-
-/**
- * Open the weightage editor modal for a subject.
- * Only shows sliders for components that actually exist in that subject.
- */
 function openWeightageModal(subject) {
     activeWeightageSubject = subject.courseCode;
-
     document.getElementById('weightageModalSubject').textContent = subject.courseName;
 
-    const slidersContainer = document.getElementById('weightageSliders');
-    slidersContainer.innerHTML = '';
+    const container = document.getElementById('weightageSliders');
+    container.innerHTML = '';
+    const current = state.subjectWeightages[subject.courseCode] || {};
 
-    // Get current custom weightages for this subject (or empty object = use defaults)
-    const currentWeightages = state.subjectWeightages[subject.courseCode] || {};
-
-    // Only build sliders for components that actually exist in this subject
-    const componentTypes = Object.keys(subject.componentData);
-
-    for (const type of componentTypes) {
-        const ltpsInfo = AttendanceCalculator.getLTPSInfo(type);
-        const defaultVal = DEFAULT_WEIGHTAGES[type] !== undefined ? DEFAULT_WEIGHTAGES[type] : 100;
-        const currentVal = currentWeightages[type] !== undefined ? currentWeightages[type] : defaultVal;
-
+    for (const type of Object.keys(subject.componentData)) {
+        const info = AttendanceCalculator.getLTPSInfo(type);
+        const def = DEFAULT_WEIGHTAGES[type] ?? 100;
+        const val = current[type] ?? def;
         const row = document.createElement('div');
         row.className = 'weightage-slider-row';
         row.innerHTML = `
             <div class="weightage-slider-label">
-                <span class="weightage-slider-icon">${ltpsInfo.icon}</span>
-                <span class="weightage-slider-name">${ltpsInfo.name} (${type})</span>
-                <span class="weightage-default-hint">Default: ${defaultVal}%</span>
+                <span class="weightage-slider-icon">${info.icon}</span>
+                <span class="weightage-slider-name">${info.name} (${type})</span>
+                <span class="weightage-default-hint">Default: ${def}%</span>
             </div>
             <div class="weightage-slider-control">
-                <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="5"
-                    value="${currentVal}"
-                    id="weightageSlider_${type}"
-                    class="weightage-range"
-                    aria-label="${ltpsInfo.name} weightage"
-                />
+                <input type="range" min="0" max="100" step="5" value="${val}"
+                    id="weightageSlider_${type}" class="weightage-range"
+                    aria-label="${info.name} weightage">
                 <div class="weightage-value-display">
-                    <span class="weightage-value-number" id="weightageVal_${type}">${currentVal}</span>
+                    <span class="weightage-value-number" id="weightageVal_${type}">${val}</span>
                     <span class="weightage-value-pct">%</span>
                 </div>
-            </div>
-        `;
-        slidersContainer.appendChild(row);
-
-        // Live update the displayed number
-        const rangeInput = row.querySelector(`#weightageSlider_${type}`);
-        const valDisplay = row.querySelector(`#weightageVal_${type}`);
-        rangeInput.addEventListener('input', () => {
-            valDisplay.textContent = rangeInput.value;
+            </div>`;
+        container.appendChild(row);
+        row.querySelector(`#weightageSlider_${type}`).addEventListener('input', e => {
+            document.getElementById(`weightageVal_${type}`).textContent = e.target.value;
         });
     }
 
-    // Show the modal with animation
     const overlay = document.getElementById('weightageModalOverlay');
     overlay.classList.remove('hidden');
     requestAnimationFrame(() => overlay.classList.add('visible'));
 }
 
-/**
- * Close the weightage modal
- */
 function closeWeightageModal() {
     const overlay = document.getElementById('weightageModalOverlay');
     overlay.classList.remove('visible');
@@ -827,35 +584,23 @@ function closeWeightageModal() {
     activeWeightageSubject = null;
 }
 
-/**
- * Apply (save) the current slider values as weightages for the active subject
- */
 function applyWeightages() {
     if (!activeWeightageSubject) return;
-
     const subject = state.processedSubjects.find(s => s.courseCode === activeWeightageSubject);
     if (!subject) return;
 
-    const componentTypes = Object.keys(subject.componentData);
-    const newWeightages = {};
-    let isAllDefault = true;
-
-    for (const type of componentTypes) {
+    const newW = {};
+    let isDefault = true;
+    for (const type of Object.keys(subject.componentData)) {
         const input = document.getElementById(`weightageSlider_${type}`);
-        if (input) {
-            const val = parseInt(input.value, 10);
-            newWeightages[type] = val;
-            const defaultVal = DEFAULT_WEIGHTAGES[type] !== undefined ? DEFAULT_WEIGHTAGES[type] : 100;
-            if (val !== defaultVal) isAllDefault = false;
-        }
+        if (!input) continue;
+        const val = parseInt(input.value, 10);
+        newW[type] = val;
+        if (val !== (DEFAULT_WEIGHTAGES[type] ?? 100)) isDefault = false;
     }
 
-    if (isAllDefault) {
-        // Remove custom weightage entirely (same as default)
-        delete state.subjectWeightages[activeWeightageSubject];
-    } else {
-        state.subjectWeightages[activeWeightageSubject] = newWeightages;
-    }
+    if (isDefault) delete state.subjectWeightages[activeWeightageSubject];
+    else state.subjectWeightages[activeWeightageSubject] = newW;
 
     saveSettings();
     closeWeightageModal();
@@ -863,26 +608,55 @@ function applyWeightages() {
     showToast('Weightages updated!');
 }
 
-/**
- * Reset the sliders to defaults for the active subject
- */
 function resetWeightages() {
     if (!activeWeightageSubject) return;
-
     const subject = state.processedSubjects.find(s => s.courseCode === activeWeightageSubject);
     if (!subject) return;
-
-    const componentTypes = Object.keys(subject.componentData);
-    for (const type of componentTypes) {
+    for (const type of Object.keys(subject.componentData)) {
         const input = document.getElementById(`weightageSlider_${type}`);
-        const valDisplay = document.getElementById(`weightageVal_${type}`);
-        if (input && valDisplay) {
-            const defaultVal = DEFAULT_WEIGHTAGES[type] !== undefined ? DEFAULT_WEIGHTAGES[type] : 100;
-            input.value = defaultVal;
-            valDisplay.textContent = defaultVal;
-        }
+        const disp = document.getElementById(`weightageVal_${type}`);
+        const def = DEFAULT_WEIGHTAGES[type] ?? 100;
+        if (input) input.value = def;
+        if (disp) disp.textContent = def;
     }
 }
 
-// Initialize when DOM is ready
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
+
+function showToast(message) {
+    const toast = Object.assign(document.createElement('div'), {
+        className: 'toast',
+        textContent: message
+    });
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add('show'));
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    }, 2000);
+}
+
+function updateLastUpdated() {
+    if (!state.lastFetched) return;
+    const date = new Date(state.lastFetched);
+    if (isNaN(date.getTime())) return;
+    const modeLabel = state.attendanceMode === 'TCBR_CORRECTED' ? ' (TCBR)' : '';
+    el.lastUpdated.textContent = formatRelativeTime(date) + modeLabel;
+}
+
+function formatRelativeTime(date) {
+    const mins = Math.floor((Date.now() - date.getTime()) / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+}
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+
 document.addEventListener('DOMContentLoaded', init);
