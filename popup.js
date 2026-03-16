@@ -451,7 +451,7 @@ function createComponentItem(type, compData, subject) {
 
     item.classList.add(`comp-${compData.status}`);
     item.querySelector('.component-icon').textContent = ltpsInfo.icon;
-    item.querySelector('.component-type').textContent = ltpsInfo.name;
+    item.querySelector('.component-type').textContent = type;
     item.querySelector('.component-percentage').textContent = `${compData.percentage.toFixed(1)}%`;
 
     const fill = item.querySelector('.component-progress-fill');

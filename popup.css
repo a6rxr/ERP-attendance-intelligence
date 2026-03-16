@@ -1369,6 +1369,7 @@ body {
     border-radius: var(--radius-sm);
     padding: var(--space-2);
     border: 1px solid var(--border-hairline);
+    min-width: 0;
     transition:
         border-color var(--transition-fast),
         box-shadow var(--transition-fast);
@@ -1384,11 +1385,13 @@ body {
     align-items: center;
     gap: var(--space-1);
     margin-bottom: var(--space-1);
+    min-width: 0;
 }
 
 .component-icon {
     font-size: 14px;
     line-height: 1;
+    flex-shrink: 0;
 }
 
 .component-type {
@@ -1396,12 +1399,16 @@ body {
     font-weight: var(--weight-semibold);
     color: var(--text-secondary);
     flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .component-percentage {
     font-size: var(--text-sm);
     font-weight: var(--weight-bold);
     color: var(--text-primary);
+    flex-shrink: 0;
 }
 
 .component-progress {
@@ -1425,6 +1432,8 @@ body {
     display: flex;
     justify-content: space-between;
     font-size: var(--text-2xs);
+    min-width: 0;
+    white-space: nowrap;
 }
 
 .component-attended {
@@ -1434,6 +1443,9 @@ body {
 
 .component-action {
     font-weight: var(--weight-semibold);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .component-action.need-classes {
