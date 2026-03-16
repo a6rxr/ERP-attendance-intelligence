@@ -23,7 +23,6 @@ A premium, highly-optimized Chrome extension for KL University students to analy
 - **Safe Bunks**: Calculates the maximum number of classes you can safely skip.
 - **Next Class Risk**: Warns you with a ⚠️ if missing the *very next class* would drop you below your safety threshold.
 
-<<<<<<< HEAD
 ## 🎨 Premium UI/UX
 
 - **Light & Dark Themes**: Fully responsive `.light-theme` and `.dark-theme` mapping to iOS Semantic colors.
@@ -39,7 +38,7 @@ A premium, highly-optimized Chrome extension for KL University students to analy
 4. Toggle **Developer mode** in the top-right corner.
 5. Click **Load unpacked** and select this extension folder.
 6. Pin "Attendance Intelligence" to your toolbar.
-=======
+
 ### ⚙️ Customization
 - **Adjustable Threshold**: Set your own minimum attendance requirement (default: 75%)
 - **Sort Options**: View subjects by risk level, name, or attendance percentage
@@ -66,7 +65,6 @@ A premium, highly-optimized Chrome extension for KL University students to analy
 5. **Pin the Extension** (recommended):
    - Click the puzzle piece icon in Chrome toolbar
    - Pin "ERP Attendance Intelligence"
->>>>>>> cd63c65229a718e459512ce07e71bb6ee940eaea
 
 ## 🚀 Usage
 
@@ -84,20 +82,18 @@ The engine is decoupled into `calculations.js`, a pure math module.
 - **ERP Standard**: `effective_attended = attended`
 - **TCBR Corrected**: `effective_attended = attended + tcbr`
 
-<<<<<<< HEAD
 ### Sub-Component Formula
 ```javascript
 component_percentage = (effective_attended / conducted) * 100
 ```
 *(Note: Components with 0 classes conducted mathematically return a 100% safety buffer).*
-=======
+
 5. **Customize Settings**:
    - Click the ⚙️ gear icon
    - Adjust your attendance threshold
    - Change sort order
    - Switch between ERP Standard and TCBR-Corrected
    - Toggle between light/dark themes
->>>>>>> cd63c65229a718e459512ce07e71bb6ee940eaea
 
 ### Aggregated Subject Percentage
 ```javascript
@@ -130,7 +126,7 @@ erp-attendance-extension/
 ## 📄 License
 
 MIT License - Feel free to use, modify, and distribute. Built to give students clarity and control over their semester.
-=======
+
 ## How the Math Works (Simplified)
 
 Component Attendance
@@ -211,4 +207,3 @@ Built for students who think ahead, not just attend.
 
 
 **Disclaimer**: This extension is an unofficial tool. Always verify attendance data with official ERP records.
->>>>>>> cd63c65229a718e459512ce07e71bb6ee940eaea
