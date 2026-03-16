@@ -23,6 +23,7 @@ A premium, highly-optimized Chrome extension for KL University students to analy
 - **Safe Bunks**: Calculates the maximum number of classes you can safely skip.
 - **Next Class Risk**: Warns you with a ⚠️ if missing the *very next class* would drop you below your safety threshold.
 
+<<<<<<< HEAD
 ## 🎨 Premium UI/UX
 
 - **Light & Dark Themes**: Fully responsive `.light-theme` and `.dark-theme` mapping to iOS Semantic colors.
@@ -38,6 +39,34 @@ A premium, highly-optimized Chrome extension for KL University students to analy
 4. Toggle **Developer mode** in the top-right corner.
 5. Click **Load unpacked** and select this extension folder.
 6. Pin "Attendance Intelligence" to your toolbar.
+=======
+### ⚙️ Customization
+- **Adjustable Threshold**: Set your own minimum attendance requirement (default: 75%)
+- **Sort Options**: View subjects by risk level, name, or attendance percentage
+- **Attendance Mode Toggle**: Choose whether TCBR should be included in attendance calculations, allowing more flexible and realistic analysis.
+- **Persistent Settings**: Your preferences are saved across sessions
+
+## 📥 Installation
+
+### Method 1: Load Unpacked (Development)
+
+1. **Download/Clone** this folder to your computer
+
+2. **Open Chrome Extensions**:
+   - Navigate to `chrome://extensions/`
+   - OR go to Menu → More Tools → Extensions
+
+3. **Enable Developer Mode**:
+   - Toggle the "Developer mode" switch in the top-right corner
+
+4. **Load the Extension**:
+   - Click "Load unpacked"
+   - Select this extension folder (`erp-attendance-intelligence`)
+
+5. **Pin the Extension** (recommended):
+   - Click the puzzle piece icon in Chrome toolbar
+   - Pin "ERP Attendance Intelligence"
+>>>>>>> cd63c65229a718e459512ce07e71bb6ee940eaea
 
 ## 🚀 Usage
 
@@ -55,11 +84,20 @@ The engine is decoupled into `calculations.js`, a pure math module.
 - **ERP Standard**: `effective_attended = attended`
 - **TCBR Corrected**: `effective_attended = attended + tcbr`
 
+<<<<<<< HEAD
 ### Sub-Component Formula
 ```javascript
 component_percentage = (effective_attended / conducted) * 100
 ```
 *(Note: Components with 0 classes conducted mathematically return a 100% safety buffer).*
+=======
+5. **Customize Settings**:
+   - Click the ⚙️ gear icon
+   - Adjust your attendance threshold
+   - Change sort order
+   - Switch between ERP Standard and TCBR-Corrected
+   - Toggle between light/dark themes
+>>>>>>> cd63c65229a718e459512ce07e71bb6ee940eaea
 
 ### Aggregated Subject Percentage
 ```javascript
@@ -84,6 +122,7 @@ erp-attendance-extension/
 
 ## 🔧 Security & Privacy
 
+<<<<<<< HEAD
 - **Zero External Tracking**: 100% of data processing happens securely in your local browser client.
 - **XSS Prevention**: `popup.js` avoids `.innerHTML` for payload injection, preventing arbitrary code execution.
 - **Least Privilege**: Only asks for `activeTab` and `storage`. Specifically scoped to `https://newerp.kluniversity.in/*`.
@@ -91,3 +130,85 @@ erp-attendance-extension/
 ## 📄 License
 
 MIT License - Feel free to use, modify, and distribute. Built to give students clarity and control over their semester.
+=======
+## How the Math Works (Simplified)
+
+Component Attendance
+percentage = effectiveAttended / conducted × 100
+
+effectiveAttended = attended (ERP Mode)
+
+effectiveAttended = attended + TCBR (TCBR-Corrected Mode)
+
+## Subject Attendance
+subjectPercentage = average(all component percentages)
+
+LTPS components are equally weighted.
+
+## Classes Needed (Below Threshold)
+(effectiveAttended + x) / (conducted + x) ≥ threshold
+
+Solves for minimum x classes you must attend consecutively.
+
+## Classes You Can Skip (Above Threshold)
+effectiveAttended / (conducted + x) ≥ threshold
+
+Solves for maximum x safe skips.
+
+```
+
+### ⚠️ Important: TCBR
+The extension internally supports multiple attendance calculation modes:
+
+- **ERP Mode**: Matches ERP’s displayed attendance exactly  
+- **TCBR-Corrected Mode**: Includes TCBR for deeper analysis
+
+The default behavior matches ERP to avoid confusion, while advanced users
+can switch modes from the settings panel.
+
+
+## 🔧 Technical Details
+
+- **Platform**: Chrome Extension (Manifest V3)
+- **Permissions**: 
+  - `activeTab`: Access current tab for data extraction
+  - `storage`: Save settings and cached data
+- **Host Permissions**: `https://newerp.kluniversity.in/*`
+- **No External APIs**: 100% client-side processing
+- **CSP Compliant**: Safe for university network policies
+
+## 🐛 Troubleshooting
+
+### "Could not find attendance table"
+- Make sure you're on the correct ERP attendance page
+- Wait for the page to fully load before clicking Fetch
+- Try refreshing the ERP page
+
+### "Could not communicate with the page"
+- Refresh the ERP page
+- Close and reopen the extension popup
+- If issue persists, reload the extension in `chrome://extensions/`
+
+### Extension not showing in toolbar
+- Go to `chrome://extensions/`
+- Make sure the extension is enabled
+- Click the puzzle piece icon and pin the extension
+
+### Icons not loading
+- Ensure PNG versions of icons exist in the `icons/` folder
+- Check that file names match those in `manifest.json`
+```
+
+## 📄 License
+
+MIT License - Feel free to use, modify, and distribute.
+
+## 🙏 Credits
+
+Built with ❤️ for KL University students who want to optimize their attendance.
+Built for students who think ahead, not just attend. 
+
+
+
+**Disclaimer**: This extension is an unofficial tool. Always verify attendance data with official ERP records.
+>>>>>>> cd63c65229a718e459512ce07e71bb6ee940eaea
